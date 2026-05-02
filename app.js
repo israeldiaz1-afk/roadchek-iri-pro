@@ -33,13 +33,15 @@ let state = {
   maxChartPoints: 60,
   activeVehicleId: null,
   dynamicBuffer: [],
-  dynamicThresholds: null
+  dynamicThresholds: null,
+  gravityBuffer: []         // Para el filtro paso‑alto del fallback
 };
 
 let mapFilterRouteId = null;
 
 // ============ BASE DE DATOS DE VEHÍCULOS ============
 const VEHICLE_DATABASE = [
+  // Compactos originales
   { id: 'v1', name: 'Toyota Corolla (2018-2024)', category: 'Compacto', coefA: 2.0, coefB: 0.50, description: 'Suspensión estándar' },
   { id: 'v2', name: 'Honda Civic (2016-2024)', category: 'Compacto', coefA: 2.1, coefB: 0.50, description: 'Firme' },
   { id: 'v3', name: 'Volkswagen Golf (2020-2024)', category: 'Compacto', coefA: 2.05, coefB: 0.50, description: 'Equilibrado' },
@@ -47,12 +49,16 @@ const VEHICLE_DATABASE = [
   { id: 'v17', name: 'SEAT Ibiza (2020-2024)', category: 'Compacto', coefA: 1.9, coefB: 0.45, description: 'Urbano' },
   { id: 'v18', name: 'Fiat 500 (2019-2024)', category: 'Compacto', coefA: 1.7, coefB: 0.40, description: 'Ciudad' },
   { id: 'v19', name: 'Opel Corsa (2020-2024)', category: 'Compacto', coefA: 1.95, coefB: 0.45, description: 'Polivalente' },
+
+  // Sedanes originales
   { id: 'v5', name: 'BMW Serie 3 (2019-2024)', category: 'Sedán', coefA: 2.3, coefB: 0.55, description: 'Deportivo' },
   { id: 'v6', name: 'Mercedes-Benz Clase C (2021-2024)', category: 'Sedán', coefA: 2.2, coefB: 0.50, description: 'Premium' },
   { id: 'v7', name: 'Audi A4 (2020-2024)', category: 'Sedán', coefA: 2.25, coefB: 0.55, description: 'Adaptativo' },
   { id: 'v8', name: 'Tesla Model 3 (2021-2024)', category: 'Sedán', coefA: 2.4, coefB: 0.60, description: 'Eléctrico' },
   { id: 'v20', name: 'Ford Mondeo (2018-2024)', category: 'Sedán', coefA: 2.15, coefB: 0.50, description: 'Familiar' },
   { id: 'v21', name: 'Skoda Octavia (2020-2024)', category: 'Sedán', coefA: 2.05, coefB: 0.45, description: 'Amplio' },
+
+  // SUV originales
   { id: 'v9', name: 'Toyota RAV4 (2019-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55, description: 'Mixto' },
   { id: 'v10', name: 'Honda CR-V (2020-2024)', category: 'SUV', coefA: 2.35, coefB: 0.55, description: 'Confort' },
   { id: 'v11', name: 'Ford Explorer (2020-2024)', category: 'SUV', coefA: 2.6, coefB: 0.60, description: 'Grande' },
@@ -64,15 +70,24 @@ const VEHICLE_DATABASE = [
   { id: 'v26', name: 'DS 7 Crossback (2021-2024)', category: 'SUV', coefA: 2.1, coefB: 0.50, description: 'Premium' },
   { id: 'v27', name: 'Peugeot 3008 (2021-2024)', category: 'SUV', coefA: 2.15, coefB: 0.50, description: 'Francés' },
   { id: 'v28', name: 'Jeep Renegade (2021-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55, description: 'Todoterreno' },
+
+  // Deportivos originales
   { id: 'v13', name: 'Porsche 911 (2020-2024)', category: 'Deportivo', coefA: 2.9, coefB: 0.65, description: 'Circuito' },
   { id: 'v14', name: 'Ford Mustang (2018-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.60, description: 'Muscle' },
   { id: 'v15', name: 'Mazda MX-5 (2016-2024)', category: 'Deportivo', coefA: 2.8, coefB: 0.60, description: 'Ligero' },
   { id: 'v16', name: 'BMW M3 (2021-2024)', category: 'Deportivo', coefA: 3.0, coefB: 0.65, description: 'Alta rigidez' },
   { id: 'v29', name: 'Subaru BRZ (2022-2024)', category: 'Deportivo', coefA: 2.75, coefB: 0.60, description: 'Tracción trasera' },
   { id: 'v30', name: 'Toyota GR86 (2022-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.55, description: 'Asequible' },
+
+  // Pick-ups
   { id: 'v31', name: 'Ford Ranger (2019-2024)', category: 'Pick-up', coefA: 2.8, coefB: 0.65, description: 'Ballesta trasera' },
   { id: 'v32', name: 'Toyota Hilux (2020-2024)', category: 'Pick-up', coefA: 2.9, coefB: 0.65, description: 'Trabajo' },
-  { id: 'v33', name: 'Volkswagen Amarok (2021-2024)', category: 'Pick-up', coefA: 2.85, coefB: 0.60, description: 'Premium' }
+  { id: 'v33', name: 'Volkswagen Amarok (2021-2024)', category: 'Pick-up', coefA: 2.85, coefB: 0.60, description: 'Premium' },
+
+  // --- NUEVOS MODELOS SOLICITADOS ---
+  { id: 'v34', name: 'Peugeot 307 SW (2002-2008)', category: 'Compacto', coefA: 2.15, coefB: 0.55, description: 'Familiar: estable y confortable' },
+  { id: 'v35', name: 'Volkswagen Passat (2012)', category: 'Sedán', coefA: 2.05, coefB: 0.50, description: 'Berlina equilibrada' },
+  { id: 'v36', name: 'Citroën e-C4 (2021-2024)', category: 'SUV', coefA: 1.65, coefB: 0.40, description: 'SUV eléctrico de gran confort' }
 ];
 
 // ============ ESCALA DINÁMICA ============
@@ -212,7 +227,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 function calculateRMS(buffer) {
   if (!buffer.length) return 0;
-  const sumSq = buffer.reduce((s, a) => s + a.z*a.z, 0);
+  const sumSq = buffer.reduce((s, val) => s + val*val, 0);
   return Math.sqrt(sumSq / buffer.length);
 }
 
@@ -281,12 +296,17 @@ function segmentizeRoute(points, segmentLengthMeters) {
 }
 
 // ============ MEDICIÓN EN TIEMPO REAL ============
-function processAccelerometerData(accel) {
-  const verticalAccel = Math.abs(accel.z);
-  const rmsAccel = calculateRMS([...state.rawAccelBuffer.slice(-50), accel]);
+function processAccelerometerData(dynamicZ) {
+  // dynamicZ es la aceleración vertical sin gravedad
+  state.rawAccelBuffer.push(dynamicZ);
+  // mantener los últimos 50 valores para RMS
+  if (state.rawAccelBuffer.length > 50) state.rawAccelBuffer.shift();
+
+  const rmsAccel = calculateRMS(state.rawAccelBuffer);
   const iriMeasured = config.coefA * rmsAccel + config.coefB;
   const speed = state.lastPosition?.speed || 0;
   const iriCorrected = correctIRI(iriMeasured, speed);
+
   document.getElementById('iriMeasured').textContent = iriMeasured.toFixed(2);
   document.getElementById('iriCorrected').textContent = iriCorrected.toFixed(2);
   updateQualityIndicator(iriCorrected);
@@ -298,7 +318,7 @@ function processAccelerometerData(accel) {
   state.iriCorrectedAccum += iriCorrected;
   state.iriCount++;
 
-  state.chartDataZ.push(verticalAccel);
+  state.chartDataZ.push(dynamicZ);
   state.chartDataIRI.push(iriCorrected);
   if (state.chartDataZ.length > state.maxChartPoints) {
     state.chartDataZ.shift();
@@ -366,6 +386,7 @@ function startMeasurement() {
   state.totalDistance = 0;
   state.currentDataPoints = [];
   state.rawAccelBuffer = [];
+  state.gravityBuffer = [];
   state.iriMeasuredAccum = 0;
   state.iriCorrectedAccum = 0;
   state.iriCount = 0;
@@ -443,28 +464,35 @@ function startGPS() {
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
   }
 }
+
 function startAccelerometer() {
   if ('Accelerometer' in window) {
     try {
-      window.accelerometer = new Accelerometer({ frequency: 60 });
+      window.accelerometer = new Accelerometer({ frequency: 60, includeGravity: false });
       window.accelerometer.addEventListener('reading', () => {
         if (state.isMeasuring && !state.isPaused) {
-          const accel = { x: accelerometer.x, y: accelerometer.y, z: accelerometer.z };
-          state.rawAccelBuffer.push(accel);
-          processAccelerometerData(accel);
+          processAccelerometerData(window.accelerometer.z);
         }
       });
       window.accelerometer.start();
-    } catch(e) { fallbackToDeviceMotion(); }
-  } else { fallbackToDeviceMotion(); }
-}
-function fallbackToDeviceMotion() {
-  window.addEventListener('deviceorientation', event => {
-    if (state.isMeasuring && !state.isPaused) {
-      const accel = { x: event.accelerationIncludingGravity?.x||0, y: event.accelerationIncludingGravity?.y||0, z: event.accelerationIncludingGravity?.z||0 };
-      state.rawAccelBuffer.push(accel);
-      processAccelerometerData(accel);
+      return;
+    } catch (e) {
+      console.warn('No se pudo usar Accelerometer con includeGravity false, usando fallback');
     }
+  }
+  fallbackToDeviceMotion();
+}
+
+function fallbackToDeviceMotion() {
+  const GRAVITY_BUFFER_SIZE = 100;
+  window.addEventListener('deviceorientation', event => {
+    if (!state.isMeasuring || state.isPaused) return;
+    const rawZ = event.accelerationIncludingGravity?.z || 0;
+    state.gravityBuffer.push(rawZ);
+    if (state.gravityBuffer.length > GRAVITY_BUFFER_SIZE) state.gravityBuffer.shift();
+    const gravityEstimate = state.gravityBuffer.reduce((a,b)=>a+b,0) / state.gravityBuffer.length;
+    const dynamicZ = rawZ - gravityEstimate;
+    processAccelerometerData(dynamicZ);
   });
 }
 
