@@ -34,15 +34,17 @@
       display: flex;
       gap: 5px;
       margin-bottom: 15px;
+      flex-wrap: wrap;
     }
     .tab-btn {
       flex: 1;
+      min-width: 60px;
       background: #0f3460;
       color: #aaa;
       border: none;
-      padding: 10px;
+      padding: 10px 6px;
       border-radius: 12px;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       cursor: pointer;
       font-weight: 600;
     }
@@ -88,10 +90,6 @@
       font-size: 0.75rem;
       opacity: 0.8;
     }
-    .iri-comparison {
-      display: flex;
-      justify-content: space-around;
-    }
     .quality-indicator {
       margin: 10px 0;
       padding: 10px;
@@ -101,16 +99,26 @@
       font-size: 0.9rem;
     }
     .map-container {
-      height: 220px;
+      height: 180px;
       border-radius: 12px;
       overflow: hidden;
       margin: 10px 0;
       background: #0f3460;
-      position: relative;
     }
     #mapMeasure, #mapGlobal {
       height: 100%;
       width: 100%;
+    }
+    .chart-container {
+      background: #0f3460;
+      border-radius: 12px;
+      padding: 10px;
+      margin: 10px 0;
+      height: 160px;
+    }
+    .chart-container canvas {
+      width: 100% !important;
+      height: 100% !important;
     }
     .controls {
       display: flex;
@@ -130,7 +138,7 @@
       justify-content: center;
       gap: 6px;
       flex: 1;
-      min-width: 100px;
+      min-width: 80px;
     }
     .btn-start { background: #e94560; color: white; }
     .btn-pause { background: #ff9800; color: white; }
@@ -138,6 +146,15 @@
     .btn-calibrate { background: #2196f3; color: white; }
     .btn-export { background: #4caf50; color: white; }
     .btn-secondary { background: #0f3460; color: white; }
+    .btn-small {
+      background: #0f3460;
+      color: white;
+      border: none;
+      padding: 6px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
     .segment-length-container {
       display: flex;
       align-items: center;
@@ -148,14 +165,14 @@
       margin: 10px 0;
     }
     .hidden { display: none !important; }
-    .history-list {
+    .history-list, .garage-list {
       max-height: 300px;
       overflow-y: auto;
       background: #0f3460;
       border-radius: 12px;
       padding: 10px;
     }
-    .history-item {
+    .history-item, .garage-item {
       background: #1a1a2e;
       border-radius: 8px;
       padding: 12px;
@@ -165,10 +182,8 @@
       align-items: center;
       cursor: pointer;
     }
-    .history-item:hover { background: #253a5e; }
-    .history-actions {
-      display: flex;
-      gap: 8px;
+    .garage-item.active {
+      border: 2px solid #e94560;
     }
     .settings-panel {
       background: #0f3460;
@@ -219,6 +234,13 @@
       height: 12px;
       border-radius: 2px;
     }
+    select {
+      background: #0f3460;
+      color: white;
+      border: none;
+      padding: 8px;
+      border-radius: 8px;
+    }
   </style>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
@@ -230,8 +252,9 @@
     
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTab('measure')">📏 Medición</button>
+      <button class="tab-btn" onclick="switchTab('garage')">🚗 Garaje</button>
       <button class="tab-btn" onclick="switchTab('history')">📋 Historial</button>
-      <button class="tab-btn" onclick="switchTab('globalMap')">🗺️ Mapa Global</button>
+      <button class="tab-btn" onclick="switchTab('globalMap')">🗺️ Mapa</button>
     </div>
 
     <!-- Pestaña Medición -->
@@ -259,6 +282,10 @@
       </div>
       <div class="map-container">
         <div id="mapMeasure"></div>
+      </div>
+      <!-- Gráfico de sensores -->
+      <div class="chart-container">
+        <canvas id="sensorChart"></canvas>
       </div>
       <div class="segment-length-container">
         <label>Longitud de tramo:</label>
@@ -291,6 +318,7 @@
       </div>
       <div id="calibrationPanel" class="settings-panel hidden">
         <h4>Calibración del Vehículo</h4>
+        <p><small>Vehículo actual: <strong id="currentVehicleName">Personalizado</strong></small></p>
         <div class="slider-container">
           <label>Coef. Suspensión (a): <span id="coefAVal">2.00</span></label>
           <input type="range" id="coefA" min="0.5" max="5.0" step="0.05" value="2.0">
@@ -303,6 +331,16 @@
           <i class="fas fa-check"></i> Guardar
         </button>
       </div>
+    </div>
+
+    <!-- Pestaña Garaje -->
+    <div id="tab-garage" class="tab-content">
+      <div class="controls" style="margin-bottom: 10px;">
+        <button class="btn btn-secondary" onclick="showAddVehicleModal()">
+          <i class="fas fa-plus"></i> Añadir coche
+        </button>
+      </div>
+      <div id="garageList" class="garage-list"></div>
     </div>
 
     <!-- Pestaña Historial -->
@@ -322,11 +360,11 @@
 
     <!-- Pestaña Mapa Global -->
     <div id="tab-globalMap" class="tab-content">
-      <div class="map-container" style="height: 350px;">
+      <div class="map-container" style="height: 250px;">
         <div id="mapGlobal"></div>
       </div>
       <div class="controls" style="margin-top: 10px;">
-        <select id="globalViewMode" onchange="updateGlobalMap()" style="background:#0f3460; color:white; border:none; padding:8px; border-radius:8px;">
+        <select id="globalViewMode" onchange="updateGlobalMap()">
           <option value="iri_measured">IRI Medido</option>
           <option value="iri_corrected">IRI Corregido</option>
           <option value="average">Promedio (si múltiples)</option>
@@ -335,7 +373,7 @@
           <i class="fas fa-redo"></i> Refrescar
         </button>
       </div>
-      <div class="color-legend" style="margin-top:5px;">
+      <div class="color-legend">
         <div class="legend-item"><div class="legend-color" style="background:#00e676;"></div> 0-2 Bueno</div>
         <div class="legend-item"><div class="legend-color" style="background:#ffeb3b;"></div> 2-4 Regular</div>
         <div class="legend-item"><div class="legend-color" style="background:#ff9800;"></div> 4-6 Malo</div>
@@ -363,12 +401,35 @@
         </div>
       </div>
     </div>
+
+    <!-- Modal para añadir vehículo -->
+    <div id="addVehicleModal" class="modal hidden">
+      <div class="modal-content">
+        <h3 id="vehicleModalTitle">Añadir vehículo</h3>
+        <div class="slider-container">
+          <label>Marca y modelo:</label>
+          <input type="text" id="vehicleName" placeholder="Ej: Toyota Corolla 2020" style="width:100%; padding:8px; border-radius:8px; border:none; background:#0f3460; color:white;">
+        </div>
+        <div class="slider-container">
+          <label>Coef. Suspensión (a): <span id="vehicleCoefAVal">2.00</span></label>
+          <input type="range" id="vehicleCoefA" min="0.5" max="5.0" step="0.05" value="2.0" oninput="document.getElementById('vehicleCoefAVal').textContent=parseFloat(this.value).toFixed(2)">
+        </div>
+        <div class="slider-container">
+          <label>Offset Vehículo (b): <span id="vehicleCoefBVal">0.50</span></label>
+          <input type="range" id="vehicleCoefB" min="0.0" max="3.0" step="0.05" value="0.5" oninput="document.getElementById('vehicleCoefBVal').textContent=parseFloat(this.value).toFixed(2)">
+        </div>
+        <div class="controls" style="margin-top:10px;">
+          <button class="btn btn-start" id="btnSaveVehicle">Guardar</button>
+          <button class="btn btn-secondary" onclick="closeVehicleModal()">Cancelar</button>
+        </div>
+      </div>
+    </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
   <script>
-    // PWA install
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       window.deferredPrompt = e;
@@ -383,9 +444,11 @@
         });
       }
     }
-    // Evento para cerrar modal al hacer clic fuera
     document.getElementById('routeModal').addEventListener('click', function(e) {
       if (e.target === this) closeModal();
+    });
+    document.getElementById('addVehicleModal').addEventListener('click', function(e) {
+      if (e.target === this) closeVehicleModal();
     });
   </script>
 </body>
