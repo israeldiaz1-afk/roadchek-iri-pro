@@ -11,14 +11,14 @@ let state = {
   rawAccelBuffer: [], iriMeasuredAccum: 0, iriCorrectedAccum: 0, iriCount: 0,
   mapMeasure: null, mapGlobal: null, mapFullscreen: null,
   measureRouteLine: null, currentMarker: null,
-  fullscreenRouteLines: [],   // segmentos ya dibujados en pantalla completa
-  currentSegmentPoints: [],   // puntos del segmento actual (aún no cerrado)
-  currentSegmentDistance: 0,
+  fullscreenRouteLines: [],
+  currentSegmentPoints: [], currentSegmentDistance: 0,
+  currentSegmentIRISum: 0, currentSegmentPointCount: 0,
   sensorChart: null, chartDataZ: [], chartDataIRI: [], maxChartPoints: 60,
   activeVehicleId: null, dynamicBuffer: [], dynamicThresholds: null,
   orientationCalibrated: false, gravityUnit: null,
   gravityCalibrationSamples: [], calibrationStartTime: 0,
-  useDeviceOrientationFallback: false
+  useDeviceOrientationFallback: false, fullscreenFirstPoint: false
 };
 
 let mapFilterRouteId = null;
@@ -83,7 +83,10 @@ function updateDynamicThresholds() {
   const mean = sum / state.dynamicBuffer.length;
   const sqDiff = state.dynamicBuffer.reduce((s,v)=>s+(v-mean)**2,0);
   const stdDev = Math.sqrt(sqDiff / state.dynamicBuffer.length);
-  state.dynamicThresholds = { low: Math.max(0.5, mean - stdDev), high: mean + stdDev };
+  state.dynamicThresholds = {
+    low: Math.max(0.5, mean - stdDev),
+    high: mean + stdDev
+  };
   return state.dynamicThresholds;
 }
 
@@ -202,8 +205,12 @@ function processAccelerometerData(verticalAccel) {
   document.getElementById('fsIRICorrected').textContent=iriCorrected.toFixed(2);
   updateQualityIndicator(iriCorrected);
 
-  state.dynamicBuffer.push(iriCorrected);
-  if(state.totalDistance<config.calibrationWindow) updateDynamicThresholds();
+  if (speed >= config.minSpeed) {
+    state.dynamicBuffer.push(iriCorrected);
+    if (state.dynamicBuffer.length > 0 && state.totalDistance < config.calibrationWindow) {
+      updateDynamicThresholds();
+    }
+  }
 
   state.iriMeasuredAccum+=iriMeasured;
   state.iriCorrectedAccum+=iriCorrected;
@@ -238,18 +245,22 @@ function updateGPSPosition(pos) {
     document.getElementById('distanceValue').textContent=state.totalDistance.toFixed(1)+' m';
     document.getElementById('fsDistance').textContent=state.totalDistance.toFixed(1)+' m';
 
-    // Actualizar trazado en mapa de medición normal
     if(state.mapMeasure){
+      if (!state.currentMarker) {
+        state.currentMarker = L.marker([latitude, longitude]).addTo(state.mapMeasure);
+        state.mapMeasure.setView([latitude, longitude], 17);
+      } else {
+        state.currentMarker.setLatLng([latitude, longitude]);
+        state.mapMeasure.panTo([latitude, longitude]);
+      }
       state.measureRouteLine.addLatLng([latitude,longitude]);
     }
 
-    // Trazado en pantalla completa con segmentos coloreados
     if(state.mapFullscreen && state.orientationCalibrated) {
       const point = {lat:latitude, lng:longitude};
       state.currentSegmentPoints.push(point);
       state.currentSegmentDistance += dist;
 
-      // Dibujar polyline temporal del segmento actual (gris claro)
       if(state.currentSegmentLine) {
         state.mapFullscreen.removeLayer(state.currentSegmentLine);
       }
@@ -258,12 +269,15 @@ function updateGPSPosition(pos) {
         { color: '#aaa', weight: 4, opacity: 0.7 }
       ).addTo(state.mapFullscreen);
 
-      // Si se alcanzó la longitud del tramo, cerrar segmento y añadir con color
+      if (!state.fullscreenFirstPoint) {
+        state.mapFullscreen.setView([latitude, longitude], 17);
+        state.fullscreenFirstPoint = true;
+      }
+
       if(state.currentSegmentDistance >= config.segmentLength) {
-        const avgIRI = state.currentSegmentPoints.length > 0 ?
-          (state.iriCorrectedAccum / Math.max(1, state.iriCount)) : 0; // Usar IRI acumulado reciente
-        // Calculamos el IRI medio real de los puntos del segmento
-        const segIRI = state.currentSegmentIRISum / state.currentSegmentPointCount || avgIRI;
+        const segIRI = state.currentSegmentPointCount > 0
+          ? state.currentSegmentIRISum / state.currentSegmentPointCount
+          : (state.iriCorrectedAccum / Math.max(1, state.iriCount));
         const color = getIRIColor(segIRI);
         const poly = L.polyline(
           state.currentSegmentPoints.map(p=>[p.lat,p.lng]),
@@ -271,7 +285,6 @@ function updateGPSPosition(pos) {
         ).addTo(state.mapFullscreen);
         state.fullscreenRouteLines.push(poly);
 
-        // Resetear segmento actual
         state.currentSegmentPoints = [];
         state.currentSegmentDistance = 0;
         state.currentSegmentIRISum = 0;
@@ -285,9 +298,7 @@ function updateGPSPosition(pos) {
   }
   state.lastPosition={lat:latitude,lon:longitude,speed:kmh};
 
-  // Acumular datos para guardar
   if(state.isMeasuring && !state.isPaused && state.orientationCalibrated) {
-    // Acumular IRI del punto actual para el segmento en curso
     if(!state.currentSegmentIRISum) state.currentSegmentIRISum = 0;
     if(!state.currentSegmentPointCount) state.currentSegmentPointCount = 0;
     const currentIRI = state.iriCorrectedAccum / Math.max(1, state.iriCount);
@@ -377,13 +388,13 @@ function enterFullscreenMode() {
   document.getElementById('fullscreen-measure').classList.remove('hidden');
   if(!state.mapFullscreen) initFullscreenMap();
   setTimeout(()=>state.mapFullscreen.invalidateSize(), 100);
-  // Limpiar trazados anteriores
   state.fullscreenRouteLines.forEach(l=>state.mapFullscreen.removeLayer(l));
   state.fullscreenRouteLines=[];
   state.currentSegmentPoints=[];
   state.currentSegmentDistance=0;
   state.currentSegmentIRISum=0;
   state.currentSegmentPointCount=0;
+  state.fullscreenFirstPoint = false;
   if(state.currentSegmentLine) { state.mapFullscreen.removeLayer(state.currentSegmentLine); state.currentSegmentLine=null; }
 }
 function exitFullscreenMode() {
@@ -411,6 +422,7 @@ function startMeasurement() {
   state.dynamicBuffer=[]; state.dynamicThresholds=null;
   state.currentSegmentPoints=[]; state.currentSegmentDistance=0;
   state.currentSegmentIRISum=0; state.currentSegmentPointCount=0;
+  state.fullscreenFirstPoint = false;
 
   document.getElementById('btnStart').classList.add('hidden');
   document.getElementById('pauseStopControls').classList.remove('hidden');
@@ -604,7 +616,7 @@ function deleteCustomVehicle(id){
   loadGarage(); showToast('Vehículo eliminado');
 }
 
-// ============ HISTORIAL (sin cambios) ============
+// ============ HISTORIAL ============
 function loadHistory() {
   const routes=getAllRoutes();
   const cont=document.getElementById('historyList');
