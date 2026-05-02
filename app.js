@@ -2,10 +2,10 @@
 const DEFAULT_CONFIG = {
   coefA: 2.0,
   coefB: 0.5,
-  speedCorrectionK: 0.015, // Factor de corrección por velocidad
-  referenceSpeed: 80,      // km/h
+  speedCorrectionK: 0.015,
+  referenceSpeed: 80,
   minSpeed: 5,
-  segmentLength: 100       // metros
+  segmentLength: 100
 };
 
 let config = {...DEFAULT_CONFIG};
@@ -25,10 +25,38 @@ let state = {
   mapGlobal: null,
   measureRouteLine: null,
   currentMarker: null,
-  segmentLines: []
+  sensorChart: null,
+  chartDataZ: [],
+  chartDataIRI: [],
+  maxChartPoints: 60,
+  activeVehicleId: null
 };
 
-// Cargar configuración guardada
+// ============ BASE DE DATOS DE VEHÍCULOS ============
+const VEHICLE_DATABASE = [
+  // Compactos
+  { id: 'v1', name: 'Toyota Corolla (2018-2024)', category: 'Compacto', coefA: 2.0, coefB: 0.50, description: 'Suspensión estándar, tasa resorte delantero ~25 N/mm' },
+  { id: 'v2', name: 'Honda Civic (2016-2024)', category: 'Compacto', coefA: 2.1, coefB: 0.50, description: 'Suspensión ligeramente más firme' },
+  { id: 'v3', name: 'Volkswagen Golf (2020-2024)', category: 'Compacto', coefA: 2.05, coefB: 0.50, description: 'Equilibrio confort-deportividad' },
+  { id: 'v4', name: 'Renault Clio (2019-2024)', category: 'Compacto', coefA: 1.9, coefB: 0.45, description: 'Orientación confort, suspensión suave' },
+  // Sedanes
+  { id: 'v5', name: 'BMW Serie 3 (2019-2024)', category: 'Sedán', coefA: 2.3, coefB: 0.55, description: 'Suspensión firme, tasa resorte ~48 N/mm' },
+  { id: 'v6', name: 'Mercedes-Benz Clase C (2021-2024)', category: 'Sedán', coefA: 2.2, coefB: 0.50, description: 'Confort premium con buena respuesta' },
+  { id: 'v7', name: 'Audi A4 (2020-2024)', category: 'Sedán', coefA: 2.25, coefB: 0.55, description: 'Suspensión adaptativa, buena rigidez' },
+  { id: 'v8', name: 'Tesla Model 3 (2021-2024)', category: 'Sedán', coefA: 2.4, coefB: 0.60, description: 'Suspensión firme por batería baja' },
+  // SUV
+  { id: 'v9', name: 'Toyota RAV4 (2019-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55, description: 'SUV medio, suspensión para terrenos mixtos' },
+  { id: 'v10', name: 'Honda CR-V (2020-2024)', category: 'SUV', coefA: 2.35, coefB: 0.55, description: 'Confort familiar, buena absorción' },
+  { id: 'v11', name: 'Ford Explorer (2020-2024)', category: 'SUV', coefA: 2.6, coefB: 0.60, description: 'SUV grande, mayor masa suspendida' },
+  { id: 'v12', name: 'Volkswagen Tiguan (2021-2024)', category: 'SUV', coefA: 2.3, coefB: 0.50, description: 'SUV compacto, ágil y estable' },
+  // Deportivos
+  { id: 'v13', name: 'Porsche 911 (2020-2024)', category: 'Deportivo', coefA: 2.9, coefB: 0.65, description: 'Suspensión muy firme, frecuencia 1.75 Hz' },
+  { id: 'v14', name: 'Ford Mustang (2018-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.60, description: 'Muscle car americano, suspensión dura' },
+  { id: 'v15', name: 'Mazda MX-5 (2016-2024)', category: 'Deportivo', coefA: 2.8, coefB: 0.60, description: 'Ligero, suspensión deportiva de serie' },
+  { id: 'v16', name: 'BMW M3 (2021-2024)', category: 'Deportivo', coefA: 3.0, coefB: 0.65, description: 'Alta rigidez, orientado a circuito' }
+];
+
+// ============ CARGA Y GUARDADO DE CONFIGURACIÓN ============
 function loadConfig() {
   const saved = localStorage.getItem('roadcheck_config');
   if (saved) {
@@ -36,10 +64,35 @@ function loadConfig() {
   }
   document.getElementById('segmentLength').value = config.segmentLength;
   updateSegmentLabel();
+  // Cargar vehículo activo
+  const activeId = localStorage.getItem('roadcheck_active_vehicle');
+  if (activeId) {
+    const allVehicles = getAllVehicles();
+    const vehicle = allVehicles.find(v => v.id === activeId);
+    if (vehicle) {
+      config.coefA = vehicle.coefA;
+      config.coefB = vehicle.coefB;
+      state.activeVehicleId = vehicle.id;
+      updateVehicleDisplay(vehicle);
+    }
+  }
 }
 
 function saveConfig() {
   localStorage.setItem('roadcheck_config', JSON.stringify(config));
+}
+
+function getAllVehicles() {
+  const userVehicles = JSON.parse(localStorage.getItem('roadcheck_custom_vehicles') || '[]');
+  return [...VEHICLE_DATABASE, ...userVehicles];
+}
+
+function saveCustomVehicles(vehicles) {
+  localStorage.setItem('roadcheck_custom_vehicles', JSON.stringify(vehicles));
+}
+
+function getCustomVehicles() {
+  return JSON.parse(localStorage.getItem('roadcheck_custom_vehicles') || '[]');
 }
 
 loadConfig();
@@ -54,6 +107,71 @@ function initMeasureMap() {
 function initGlobalMap() {
   state.mapGlobal = L.map('mapGlobal', { zoomControl: true, attributionControl: false }).setView([0, 0], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.mapGlobal);
+}
+
+// ============ INICIALIZACIÓN DEL GRÁFICO ============
+function initSensorChart() {
+  const ctx = document.getElementById('sensorChart').getContext('2d');
+  state.sensorChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Acel. Z (m/s²)',
+          data: [],
+          borderColor: '#00bcd4',
+          backgroundColor: 'rgba(0,188,212,0.1)',
+          yAxisID: 'y',
+          tension: 0.3,
+          pointRadius: 0
+        },
+        {
+          label: 'IRI Corregido',
+          data: [],
+          borderColor: '#e94560',
+          backgroundColor: 'rgba(233,69,96,0.1)',
+          yAxisID: 'y1',
+          tension: 0.3,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: {
+        x: {
+          display: false
+        },
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          title: { display: true, text: 'm/s²', color: '#00bcd4' },
+          min: 0,
+          max: 20,
+          ticks: { color: '#00bcd4' }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          title: { display: true, text: 'IRI', color: '#e94560' },
+          min: 0,
+          max: 10,
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#e94560' }
+        }
+      },
+      plugins: {
+        legend: {
+          labels: { color: '#aaa', font: { size: 10 } }
+        }
+      }
+    }
+  });
 }
 
 // ============ UTILIDADES ============
@@ -156,7 +274,7 @@ function segmentizeRoute(points, segmentLengthMeters) {
         iriCorrectedAvg: avgIRICorrected,
         speedAvg: avgSpeed,
         distance: accumulatedDist,
-        color: getIRIColor(avgIRICorrected) // Usamos corregido por defecto
+        color: getIRIColor(avgIRICorrected)
       });
       currentSegment = { points: [], iriMeasuredSum: 0, iriCorrectedSum: 0, speedSum: 0, count: 0 };
       accumulatedDist = 0;
@@ -172,14 +290,28 @@ function processAccelerometerData(accel) {
   const iriMeasured = config.coefA * rmsAccel + config.coefB;
   const speed = state.lastPosition?.speed || 0;
   const iriCorrected = correctIRI(iriMeasured, speed);
-  
+
   document.getElementById('iriMeasured').textContent = iriMeasured.toFixed(2);
   document.getElementById('iriCorrected').textContent = iriCorrected.toFixed(2);
   updateQualityIndicator(iriCorrected);
-  
+
   state.iriMeasuredAccum += iriMeasured;
   state.iriCorrectedAccum += iriCorrected;
   state.iriCount++;
+
+  // Actualizar gráfico
+  state.chartDataZ.push(verticalAccel);
+  state.chartDataIRI.push(iriCorrected);
+  if (state.chartDataZ.length > state.maxChartPoints) {
+    state.chartDataZ.shift();
+    state.chartDataIRI.shift();
+  }
+  if (state.sensorChart) {
+    state.sensorChart.data.labels = state.chartDataZ.map((_, i) => i);
+    state.sensorChart.data.datasets[0].data = state.chartDataZ;
+    state.sensorChart.data.datasets[1].data = state.chartDataIRI;
+    state.sensorChart.update('none');
+  }
 }
 
 function updateQualityIndicator(iri) {
@@ -203,14 +335,14 @@ function updateGPSPosition(position) {
   const { latitude, longitude, speed } = position.coords;
   const speedKmh = speed ? speed * 3.6 : 0;
   document.getElementById('speedValue').textContent = speedKmh.toFixed(1) + ' km/h';
-  
+
   if (state.lastPosition) {
     const dist = calculateDistance(state.lastPosition.lat, state.lastPosition.lon, latitude, longitude);
     state.totalDistance += dist;
     document.getElementById('distanceValue').textContent = state.totalDistance.toFixed(1) + ' m';
   }
   state.lastPosition = { lat: latitude, lon: longitude, speed: speedKmh };
-  
+
   const latlng = [latitude, longitude];
   if (state.mapMeasure) {
     if (!state.currentMarker) {
@@ -222,7 +354,7 @@ function updateGPSPosition(position) {
     }
     state.measureRouteLine.addLatLng(latlng);
   }
-  
+
   if (state.isMeasuring && !state.isPaused) {
     const iriMeasured = state.iriCount > 0 ? state.iriMeasuredAccum / state.iriCount : 0;
     const iriCorrected = state.iriCount > 0 ? state.iriCorrectedAccum / state.iriCount : 0;
@@ -252,20 +384,29 @@ function startMeasurement() {
   state.iriCorrectedAccum = 0;
   state.iriCount = 0;
   state.lastPosition = null;
-  
+  state.chartDataZ = [];
+  state.chartDataIRI = [];
+
   document.getElementById('btnStart').classList.add('hidden');
   document.getElementById('pauseStopControls').classList.remove('hidden');
   document.getElementById('btnResume').classList.add('hidden');
   document.getElementById('iriMeasured').textContent = '---';
   document.getElementById('iriCorrected').textContent = '---';
   document.getElementById('qualityIndicator').classList.add('hidden');
-  
+
   if (state.mapMeasure) {
     state.measureRouteLine.setLatLngs([]);
     if (state.currentMarker) state.mapMeasure.removeLayer(state.currentMarker);
     state.currentMarker = null;
   }
-  
+
+  if (state.sensorChart) {
+    state.sensorChart.data.labels = [];
+    state.sensorChart.data.datasets[0].data = [];
+    state.sensorChart.data.datasets[1].data = [];
+    state.sensorChart.update();
+  }
+
   startGPS();
   startAccelerometer();
   updateTimer();
@@ -296,16 +437,16 @@ function stopMeasurement() {
   document.getElementById('pauseStopControls').classList.add('hidden');
   document.getElementById('btnResume').classList.add('hidden');
   document.getElementById('btnStart').classList.remove('hidden');
-  
+
   if (state.currentDataPoints.length > 0) {
     const segmentLength = config.segmentLength;
     const segments = segmentizeRoute(state.currentDataPoints, segmentLength);
-    
+
     const allMeasured = state.currentDataPoints.map(p => p.iri_measured);
     const allCorrected = state.currentDataPoints.map(p => p.iri_corrected);
     const avgMeasured = allMeasured.reduce((a,b)=>a+b,0) / allMeasured.length;
     const avgCorrected = allCorrected.reduce((a,b)=>a+b,0) / allCorrected.length;
-    
+
     const route = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
@@ -389,7 +530,7 @@ function switchTab(tabName) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-' + tabName).classList.add('active');
   document.querySelector(`.tab-btn[onclick*="${tabName}"]`).classList.add('active');
-  
+
   if (tabName === 'globalMap') {
     setTimeout(() => {
       if (state.mapGlobal) state.mapGlobal.invalidateSize();
@@ -398,6 +539,9 @@ function switchTab(tabName) {
   }
   if (tabName === 'history') {
     loadHistory();
+  }
+  if (tabName === 'garage') {
+    loadGarage();
   }
 }
 
@@ -415,6 +559,16 @@ function applyCalibration() {
   saveConfig();
   document.getElementById('calibrationPanel').classList.add('hidden');
   showToast('Calibración guardada');
+  // Si hay un vehículo activo que no coincide, desvincularlo
+  if (state.activeVehicleId) {
+    const allVehicles = getAllVehicles();
+    const current = allVehicles.find(v => v.id === state.activeVehicleId);
+    if (current && (Math.abs(current.coefA - config.coefA) > 0.05 || Math.abs(current.coefB - config.coefB) > 0.05)) {
+      state.activeVehicleId = null;
+      localStorage.removeItem('roadcheck_active_vehicle');
+      document.getElementById('currentVehicleName').textContent = 'Personalizado';
+    }
+  }
 }
 
 function showSettings() {
@@ -436,7 +590,7 @@ function showSettings() {
     </div>
   `;
   document.body.appendChild(modal);
-  
+
   document.getElementById('speedK').addEventListener('input', e => {
     document.getElementById('speedKVal').textContent = parseFloat(e.target.value).toFixed(3);
   });
@@ -452,6 +606,116 @@ function showSettings() {
   });
 }
 
+function updateVehicleDisplay(vehicle) {
+  document.getElementById('currentVehicleName').textContent = vehicle ? vehicle.name : 'Personalizado';
+  document.getElementById('coefA').value = config.coefA;
+  document.getElementById('coefB').value = config.coefB;
+  document.getElementById('coefAVal').textContent = config.coefA.toFixed(2);
+  document.getElementById('coefBVal').textContent = config.coefB.toFixed(2);
+}
+
+// ============ GARAJE ============
+function loadGarage() {
+  const allVehicles = getAllVehicles();
+  const container = document.getElementById('garageList');
+
+  const categories = ['Compacto', 'Sedán', 'SUV', 'Deportivo', 'Personalizado'];
+  let html = '';
+
+  categories.forEach(cat => {
+    const vehiclesInCat = allVehicles.filter(v => v.category === cat);
+    if (vehiclesInCat.length > 0) {
+      html += `<h4 style="margin:10px 0 5px; color:#e94560;">${cat}</h4>`;
+      vehiclesInCat.forEach(v => {
+        const isActive = state.activeVehicleId === v.id;
+        html += `
+          <div class="garage-item ${isActive ? 'active' : ''}" onclick="selectVehicle('${v.id}')">
+            <div>
+              <strong>${v.name}</strong><br>
+              <small>a: ${v.coefA.toFixed(2)} | b: ${v.coefB.toFixed(2)}</small>
+            </div>
+            <div>
+              ${v.id.startsWith('v') && !v.id.startsWith('vc') ? '' : `<button class="btn-small" onclick="event.stopPropagation(); deleteCustomVehicle('${v.id}')">🗑️</button>`}
+            </div>
+          </div>
+        `;
+      });
+    }
+  });
+
+  container.innerHTML = html;
+}
+
+function selectVehicle(vehicleId) {
+  const allVehicles = getAllVehicles();
+  const vehicle = allVehicles.find(v => v.id === vehicleId);
+  if (!vehicle) return;
+
+  config.coefA = vehicle.coefA;
+  config.coefB = vehicle.coefB;
+  state.activeVehicleId = vehicle.id;
+  localStorage.setItem('roadcheck_active_vehicle', vehicle.id);
+  saveConfig();
+  updateVehicleDisplay(vehicle);
+  loadGarage();
+  showToast(`Vehículo seleccionado: ${vehicle.name}`);
+}
+
+function showAddVehicleModal() {
+  document.getElementById('addVehicleModal').classList.remove('hidden');
+  document.getElementById('vehicleModalTitle').textContent = 'Añadir vehículo personalizado';
+  document.getElementById('vehicleName').value = '';
+  document.getElementById('vehicleCoefA').value = config.coefA;
+  document.getElementById('vehicleCoefB').value = config.coefB;
+  document.getElementById('vehicleCoefAVal').textContent = config.coefA.toFixed(2);
+  document.getElementById('vehicleCoefBVal').textContent = config.coefB.toFixed(2);
+  document.getElementById('btnSaveVehicle').onclick = saveNewVehicle;
+}
+
+function closeVehicleModal() {
+  document.getElementById('addVehicleModal').classList.add('hidden');
+}
+
+function saveNewVehicle() {
+  const name = document.getElementById('vehicleName').value.trim();
+  if (!name) {
+    showToast('Introduce un nombre para el vehículo');
+    return;
+  }
+  const coefA = parseFloat(document.getElementById('vehicleCoefA').value);
+  const coefB = parseFloat(document.getElementById('vehicleCoefB').value);
+
+  const customVehicles = getCustomVehicles();
+  const newVehicle = {
+    id: 'vc' + Date.now(),
+    name: name,
+    category: 'Personalizado',
+    coefA: coefA,
+    coefB: coefB,
+    description: 'Vehículo personalizado'
+  };
+  customVehicles.push(newVehicle);
+  saveCustomVehicles(customVehicles);
+  closeVehicleModal();
+  selectVehicle(newVehicle.id);
+  loadGarage();
+  showToast('Vehículo guardado y seleccionado');
+}
+
+function deleteCustomVehicle(vehicleId) {
+  if (!vehicleId.startsWith('vc')) return; // No borrar predefinidos
+  let customVehicles = getCustomVehicles();
+  customVehicles = customVehicles.filter(v => v.id !== vehicleId);
+  saveCustomVehicles(customVehicles);
+  if (state.activeVehicleId === vehicleId) {
+    state.activeVehicleId = null;
+    localStorage.removeItem('roadcheck_active_vehicle');
+    document.getElementById('currentVehicleName').textContent = 'Personalizado';
+  }
+  loadGarage();
+  showToast('Vehículo eliminado');
+}
+
 // ============ HISTORIAL ============
 function loadHistory() {
   const routes = getAllRoutes();
@@ -460,7 +724,7 @@ function loadHistory() {
     container.innerHTML = '<p style="text-align:center;">No hay rutas guardadas</p>';
     return;
   }
-  
+
   container.innerHTML = routes.map(r => `
     <div class="history-item" onclick="viewRouteDetail('${r.id}')">
       <div>
@@ -481,18 +745,18 @@ function viewRouteDetail(id) {
   const routes = getAllRoutes();
   const route = routes.find(r => r.id === id);
   if (!route) return;
-  
+
   currentRouteId = id;
   document.getElementById('routeModalTitle').textContent = `Ruta del ${formatDate(route.date)}`;
   document.getElementById('routeDate').textContent = formatDate(route.date);
   document.getElementById('routeDistance').textContent = route.totalDistance.toFixed(1) + ' m';
   document.getElementById('routeIRIMeasuredAvg').textContent = route.avgIRIMeasured?.toFixed(2) || 'N/A';
   document.getElementById('routeIRICorrectedAvg').textContent = route.avgIRICorrected?.toFixed(2) || 'N/A';
-  
+
   const segmentList = document.getElementById('routeSegmentList');
   if (route.segments && route.segments.length > 0) {
-    segmentList.innerHTML = '<p><strong>Segmentos:</strong></p>' + 
-      route.segments.map((seg, i) => 
+    segmentList.innerHTML = '<p><strong>Segmentos:</strong></p>' +
+      route.segments.map((seg, i) =>
         `<div style="background:#0f3460; padding:5px; margin:3px 0; border-radius:4px; display:flex; align-items:center;">
           <span style="background:${seg.color}; width:12px; height:12px; display:inline-block; margin-right:6px;"></span>
           Seg ${i+1}: ${seg.distance.toFixed(0)}m | IRI med: ${seg.iriMeasuredAvg.toFixed(2)} | IRI corr: ${seg.iriCorrectedAvg.toFixed(2)}
@@ -501,7 +765,7 @@ function viewRouteDetail(id) {
   } else {
     segmentList.innerHTML = '<p>No hay segmentos calculados.</p>';
   }
-  
+
   document.getElementById('routeModal').classList.remove('hidden');
 }
 
@@ -531,12 +795,12 @@ function exportRouteCSV(id) {
   const routes = getAllRoutes();
   const route = routes.find(r => r.id === id);
   if (!route || !route.points) return;
-  
+
   let csv = 'Timestamp,Lat,Long,Speed,IRI_Measured,IRI_Corrected\n';
   route.points.forEach(p => {
     csv += `${p.timestamp},${p.lat},${p.lon},${p.speed},${p.iri_measured},${p.iri_corrected}\n`;
   });
-  
+
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -549,19 +813,19 @@ function exportRouteCSV(id) {
 // ============ MAPA GLOBAL ============
 function updateGlobalMap() {
   if (!state.mapGlobal) return;
-  
+
   state.mapGlobal.eachLayer(layer => {
     if (layer instanceof L.Polyline || layer instanceof L.CircleMarker) {
       state.mapGlobal.removeLayer(layer);
     }
   });
-  
+
   const routes = getAllRoutes();
   if (routes.length === 0) return;
-  
+
   const mode = document.getElementById('globalViewMode').value;
   let allSegments = [];
-  
+
   routes.forEach(route => {
     if (route.segments && route.segments.length > 0) {
       route.segments.forEach(seg => {
@@ -578,7 +842,7 @@ function updateGlobalMap() {
       L.polyline(points, { color: getIRIColor(iri), weight: 3, opacity: 0.7 }).addTo(state.mapGlobal);
     }
   });
-  
+
   allSegments.forEach(seg => {
     if (seg.points && seg.points.length >= 2) {
       const latlngs = seg.points.map(p => [p.lat, p.lon]);
@@ -589,7 +853,7 @@ function updateGlobalMap() {
       }).addTo(state.mapGlobal).on('click', () => showSegmentInfo(seg));
     }
   });
-  
+
   if (allSegments.length > 0) {
     const allPoints = allSegments.flatMap(s => s.points.map(p => [p.lat, p.lon]));
     if (allPoints.length > 0) {
@@ -615,16 +879,27 @@ function showSegmentInfo(seg) {
 document.addEventListener('DOMContentLoaded', () => {
   initMeasureMap();
   initGlobalMap();
-  
+  initSensorChart();
+
   document.getElementById('coefA').addEventListener('input', e => {
     document.getElementById('coefAVal').textContent = parseFloat(e.target.value).toFixed(2);
   });
   document.getElementById('coefB').addEventListener('input', e => {
     document.getElementById('coefBVal').textContent = parseFloat(e.target.value).toFixed(2);
   });
-  
+
   document.getElementById('coefA').value = config.coefA;
   document.getElementById('coefB').value = config.coefB;
   document.getElementById('coefAVal').textContent = config.coefA.toFixed(2);
   document.getElementById('coefBVal').textContent = config.coefB.toFixed(2);
+
+  // Cargar nombre de vehículo activo
+  const activeId = localStorage.getItem('roadcheck_active_vehicle');
+  if (activeId) {
+    const allVehicles = getAllVehicles();
+    const vehicle = allVehicles.find(v => v.id === activeId);
+    if (vehicle) {
+      updateVehicleDisplay(vehicle);
+    }
+  }
 });
