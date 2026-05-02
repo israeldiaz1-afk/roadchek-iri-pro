@@ -5,7 +5,9 @@ const DEFAULT_CONFIG = {
   speedCorrectionK: 0.015,
   referenceSpeed: 80,
   minSpeed: 5,
-  segmentLength: 100
+  segmentLength: 100,
+  dynamicIRI: true,        // Activar escala inteligente
+  calibrationWindow: 100   // Metros de aprendizaje
 };
 
 let config = {...DEFAULT_CONFIG};
@@ -29,32 +31,90 @@ let state = {
   chartDataZ: [],
   chartDataIRI: [],
   maxChartPoints: 60,
-  activeVehicleId: null
+  activeVehicleId: null,
+  // Búfer para cálculo dinámico de IRI
+  dynamicBuffer: [],
+  dynamicThresholds: null
 };
 
-// ============ BASE DE DATOS DE VEHÍCULOS ============
+// ============ BASE DE DATOS DE VEHÍCULOS AMPLIADA ============
 const VEHICLE_DATABASE = [
   // Compactos
   { id: 'v1', name: 'Toyota Corolla (2018-2024)', category: 'Compacto', coefA: 2.0, coefB: 0.50, description: 'Suspensión estándar, tasa resorte delantero ~25 N/mm' },
   { id: 'v2', name: 'Honda Civic (2016-2024)', category: 'Compacto', coefA: 2.1, coefB: 0.50, description: 'Suspensión ligeramente más firme' },
   { id: 'v3', name: 'Volkswagen Golf (2020-2024)', category: 'Compacto', coefA: 2.05, coefB: 0.50, description: 'Equilibrio confort-deportividad' },
   { id: 'v4', name: 'Renault Clio (2019-2024)', category: 'Compacto', coefA: 1.9, coefB: 0.45, description: 'Orientación confort, suspensión suave' },
+  // Compactos adicionales
+  { id: 'v17', name: 'SEAT Ibiza (2020-2024)', category: 'Compacto', coefA: 1.9, coefB: 0.45, description: 'SUV compacto, suspensión firme' },
+  { id: 'v18', name: 'Fiat 500 (2019-2024)', category: 'Compacto', coefA: 1.7, coefB: 0.40, description: 'Urbano, baja rigidez' },
+  { id: 'v19', name: 'Opel Corsa (2020-2024)', category: 'Compacto', coefA: 1.95, coefB: 0.45, description: 'Equilibrio urbano' },
+
   // Sedanes
   { id: 'v5', name: 'BMW Serie 3 (2019-2024)', category: 'Sedán', coefA: 2.3, coefB: 0.55, description: 'Suspensión firme, tasa resorte ~48 N/mm' },
   { id: 'v6', name: 'Mercedes-Benz Clase C (2021-2024)', category: 'Sedán', coefA: 2.2, coefB: 0.50, description: 'Confort premium con buena respuesta' },
   { id: 'v7', name: 'Audi A4 (2020-2024)', category: 'Sedán', coefA: 2.25, coefB: 0.55, description: 'Suspensión adaptativa, buena rigidez' },
   { id: 'v8', name: 'Tesla Model 3 (2021-2024)', category: 'Sedán', coefA: 2.4, coefB: 0.60, description: 'Suspensión firme por batería baja' },
+  // Sedanes adicionales
+  { id: 'v20', name: 'Ford Mondeo (2018-2024)', category: 'Sedán', coefA: 2.15, coefB: 0.50, description: 'Berlina familiar, confort de marcha' },
+  { id: 'v21', name: 'Skoda Octavia (2020-2024)', category: 'Sedán', coefA: 2.05, coefB: 0.45, description: 'Equilibrio entre confort y firmeza' },
+
   // SUV
   { id: 'v9', name: 'Toyota RAV4 (2019-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55, description: 'SUV medio, suspensión para terrenos mixtos' },
   { id: 'v10', name: 'Honda CR-V (2020-2024)', category: 'SUV', coefA: 2.35, coefB: 0.55, description: 'Confort familiar, buena absorción' },
   { id: 'v11', name: 'Ford Explorer (2020-2024)', category: 'SUV', coefA: 2.6, coefB: 0.60, description: 'SUV grande, mayor masa suspendida' },
   { id: 'v12', name: 'Volkswagen Tiguan (2021-2024)', category: 'SUV', coefA: 2.3, coefB: 0.50, description: 'SUV compacto, ágil y estable' },
+  // SUV adicionales
+  { id: 'v22', name: 'Nissan Qashqai (2019-2024)', category: 'SUV', coefA: 2.3, coefB: 0.50, description: 'SUV compacto, suspensión estable' },
+  { id: 'v23', name: 'Kia Sportage (2022-2024)', category: 'SUV', coefA: 2.35, coefB: 0.50, description: 'Suspensión ligeramente firme para SUV' },
+  { id: 'v24', name: 'Hyundai Tucson (2023-2024)', category: 'SUV', coefA: 2.2, coefB: 0.50, description: 'Confort y versatilidad' },
+  { id: 'v25', name: 'MG ZS (2020-2024)', category: 'SUV', coefA: 2.25, coefB: 0.50, description: 'SUV económico, suspensión adaptable' },
+  { id: 'v26', name: 'DS 7 Crossback (2021-2024)', category: 'SUV', coefA: 2.1, coefB: 0.50, description: 'SUV premium, suspensión activa' },
+  { id: 'v27', name: 'Peugeot 3008 (2021-2024)', category: 'SUV', coefA: 2.15, coefB: 0.50, description: 'Estilo y confort' },
+  { id: 'v28', name: 'Jeep Renegade (2021-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55, description: 'Suspensión resistente para todoterreno' },
+
   // Deportivos
   { id: 'v13', name: 'Porsche 911 (2020-2024)', category: 'Deportivo', coefA: 2.9, coefB: 0.65, description: 'Suspensión muy firme, frecuencia 1.75 Hz' },
   { id: 'v14', name: 'Ford Mustang (2018-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.60, description: 'Muscle car americano, suspensión dura' },
   { id: 'v15', name: 'Mazda MX-5 (2016-2024)', category: 'Deportivo', coefA: 2.8, coefB: 0.60, description: 'Ligero, suspensión deportiva de serie' },
-  { id: 'v16', name: 'BMW M3 (2021-2024)', category: 'Deportivo', coefA: 3.0, coefB: 0.65, description: 'Alta rigidez, orientado a circuito' }
+  { id: 'v16', name: 'BMW M3 (2021-2024)', category: 'Deportivo', coefA: 3.0, coefB: 0.65, description: 'Alta rigidez, orientado a circuito' },
+  // Deportivos adicionales
+  { id: 'v29', name: 'Subaru BRZ (2022-2024)', category: 'Deportivo', coefA: 2.75, coefB: 0.60, description: 'Tracción trasera ligera, suspensión deportiva' },
+  { id: 'v30', name: 'Toyota GR86 (2022-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.55, description: 'Deportivo asequible con buena respuesta' },
+
+  // Pick-ups
+  { id: 'v31', name: 'Ford Ranger (2019-2024)', category: 'Pick-up', coefA: 2.8, coefB: 0.65, description: 'Pick-up medio, suspensión trasera de ballesta' },
+  { id: 'v32', name: 'Toyota Hilux (2020-2024)', category: 'Pick-up', coefA: 2.9, coefB: 0.65, description: 'Robusta, preparada para trabajo pesado' },
+  { id: 'v33', name: 'Volkswagen Amarok (2021-2024)', category: 'Pick-up', coefA: 2.85, coefB: 0.60, description: 'Pick-up premium, buen confort' }
 ];
+
+// ============ NUEVA FUNCIÓN DE COLOR DINÁMICO ============
+function getIRIColor(iri) {
+  if (config.dynamicIRI && state.dynamicThresholds) {
+    const { low, high } = state.dynamicThresholds;
+    if (iri <= low) return '#00e676';       // Verde
+    if (iri <= high) return '#ffeb3b';      // Amarillo
+    return '#f44336';                       // Rojo
+  }
+  // Escala fija clásica si dinámico está desactivado
+  if (iri <= 2) return '#00e676';
+  if (iri <= 4) return '#ffeb3b';
+  if (iri <= 6) return '#ff9800';
+  return '#f44336';
+}
+
+function updateDynamicThresholds() {
+  if (state.dynamicBuffer.length < 10) return null;
+  const sum = state.dynamicBuffer.reduce((a, b) => a + b, 0);
+  const mean = sum / state.dynamicBuffer.length;
+  const sqDiff = state.dynamicBuffer.reduce((s, v) => s + (v - mean) ** 2, 0);
+  const stdDev = Math.sqrt(sqDiff / state.dynamicBuffer.length);
+  
+  state.dynamicThresholds = {
+    low: Math.max(0.5, mean - stdDev),
+    high: mean + stdDev
+  };
+  return state.dynamicThresholds;
+}
 
 // ============ CARGA Y GUARDADO DE CONFIGURACIÓN ============
 function loadConfig() {
@@ -64,7 +124,6 @@ function loadConfig() {
   }
   document.getElementById('segmentLength').value = config.segmentLength;
   updateSegmentLabel();
-  // Cargar vehículo activo
   const activeId = localStorage.getItem('roadcheck_active_vehicle');
   if (activeId) {
     const allVehicles = getAllVehicles();
@@ -142,9 +201,7 @@ function initSensorChart() {
       maintainAspectRatio: false,
       animation: false,
       scales: {
-        x: {
-          display: false
-        },
+        x: { display: false },
         y: {
           type: 'linear',
           display: true,
@@ -165,11 +222,7 @@ function initSensorChart() {
           ticks: { color: '#e94560' }
         }
       },
-      plugins: {
-        legend: {
-          labels: { color: '#aaa', font: { size: 10 } }
-        }
-      }
+      plugins: { legend: { labels: { color: '#aaa', font: { size: 10 } } } }
     }
   });
 }
@@ -179,7 +232,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
@@ -187,13 +240,6 @@ function calculateRMS(buffer) {
   if (!buffer.length) return 0;
   const sumSq = buffer.reduce((s, a) => s + a.z*a.z, 0);
   return Math.sqrt(sumSq / buffer.length);
-}
-
-function getIRIColor(iri) {
-  if (iri <= 2) return '#00e676';
-  if (iri <= 4) return '#ffeb3b';
-  if (iri <= 6) return '#ff9800';
-  return '#f44336';
 }
 
 function correctIRI(measuredIRI, speed) {
@@ -215,69 +261,46 @@ function showToast(msg) {
   setTimeout(() => toast.remove(), 2000);
 }
 
-// ============ GESTIÓN DE RUTAS (LOCAL STORAGE) ============
+// ============ GESTIÓN DE RUTAS ============
 function saveRoute(routeData) {
   const routes = JSON.parse(localStorage.getItem('roadcheck_routes') || '[]');
   routes.push(routeData);
   localStorage.setItem('roadcheck_routes', JSON.stringify(routes));
 }
-
-function getAllRoutes() {
-  return JSON.parse(localStorage.getItem('roadcheck_routes') || '[]');
-}
-
+function getAllRoutes() { return JSON.parse(localStorage.getItem('roadcheck_routes') || '[]'); }
 function deleteRouteById(id) {
   let routes = getAllRoutes();
   routes = routes.filter(r => r.id !== id);
   localStorage.setItem('roadcheck_routes', JSON.stringify(routes));
 }
+function clearAllRoutes() { localStorage.removeItem('roadcheck_routes'); }
 
-function clearAllRoutes() {
-  localStorage.removeItem('roadcheck_routes');
-}
-
-// ============ PROCESAMIENTO DE SEGMENTOS ============
+// ============ SEGMENTACIÓN ============
 function segmentizeRoute(points, segmentLengthMeters) {
   const segments = [];
   if (points.length < 2) return segments;
-  
-  let currentSegment = {
-    points: [],
-    iriMeasuredSum: 0,
-    iriCorrectedSum: 0,
-    speedSum: 0,
-    count: 0
-  };
-  let accumulatedDist = 0;
-  
+  let seg = { points: [], iriMeasuredSum: 0, iriCorrectedSum: 0, speedSum: 0, count: 0 };
+  let dist = 0;
   for (let i = 1; i < points.length; i++) {
-    const prev = points[i-1];
-    const curr = points[i];
-    const dist = calculateDistance(prev.lat, prev.lon, curr.lat, curr.lon);
-    accumulatedDist += dist;
-    
-    currentSegment.points.push(curr);
-    currentSegment.iriMeasuredSum += curr.iri_measured;
-    currentSegment.iriCorrectedSum += curr.iri_corrected;
-    currentSegment.speedSum += curr.speed;
-    currentSegment.count++;
-    
-    if (accumulatedDist >= segmentLengthMeters || i === points.length - 1) {
-      const avgIRIMeasured = currentSegment.iriMeasuredSum / currentSegment.count;
-      const avgIRICorrected = currentSegment.iriCorrectedSum / currentSegment.count;
-      const avgSpeed = currentSegment.speedSum / currentSegment.count;
+    const prev = points[i-1], curr = points[i];
+    const d = calculateDistance(prev.lat, prev.lon, curr.lat, curr.lon);
+    dist += d;
+    seg.points.push(curr);
+    seg.iriMeasuredSum += curr.iri_measured;
+    seg.iriCorrectedSum += curr.iri_corrected;
+    seg.speedSum += curr.speed;
+    seg.count++;
+    if (dist >= segmentLengthMeters || i === points.length - 1) {
       segments.push({
-        startPoint: points[i - currentSegment.count],
-        endPoint: curr,
-        points: [...currentSegment.points],
-        iriMeasuredAvg: avgIRIMeasured,
-        iriCorrectedAvg: avgIRICorrected,
-        speedAvg: avgSpeed,
-        distance: accumulatedDist,
-        color: getIRIColor(avgIRICorrected)
+        points: [...seg.points],
+        iriMeasuredAvg: seg.iriMeasuredSum / seg.count,
+        iriCorrectedAvg: seg.iriCorrectedSum / seg.count,
+        speedAvg: seg.speedSum / seg.count,
+        distance: dist,
+        color: getIRIColor(seg.iriCorrectedSum / seg.count)
       });
-      currentSegment = { points: [], iriMeasuredSum: 0, iriCorrectedSum: 0, speedSum: 0, count: 0 };
-      accumulatedDist = 0;
+      seg = { points: [], iriMeasuredSum: 0, iriCorrectedSum: 0, speedSum: 0, count: 0 };
+      dist = 0;
     }
   }
   return segments;
@@ -294,6 +317,12 @@ function processAccelerometerData(accel) {
   document.getElementById('iriMeasured').textContent = iriMeasured.toFixed(2);
   document.getElementById('iriCorrected').textContent = iriCorrected.toFixed(2);
   updateQualityIndicator(iriCorrected);
+
+  // Acumular para buffer dinámico
+  state.dynamicBuffer.push(iriCorrected);
+  if (state.totalDistance < config.calibrationWindow) {
+    updateDynamicThresholds();
+  }
 
   state.iriMeasuredAccum += iriMeasured;
   state.iriCorrectedAccum += iriCorrected;
@@ -317,17 +346,10 @@ function processAccelerometerData(accel) {
 function updateQualityIndicator(iri) {
   const indicator = document.getElementById('qualityIndicator');
   indicator.classList.remove('hidden');
-  let text = '';
-  if (iri <= 3.0) {
-    indicator.style.background = '#1b5e20';
-    text = 'Bueno';
-  } else if (iri <= 4.5) {
-    indicator.style.background = '#e65100';
-    text = 'Regular';
-  } else {
-    indicator.style.background = '#b71c1c';
-    text = 'Malo';
-  }
+  let text = '', color = getIRIColor(iri);
+  if (color === '#00e676') { indicator.style.background = '#1b5e20'; text = 'Bueno'; }
+  else if (color === '#ffeb3b') { indicator.style.background = '#e65100'; text = 'Regular'; }
+  else { indicator.style.background = '#b71c1c'; text = 'Malo'; }
   indicator.textContent = `Estado: ${text} (IRI ${iri.toFixed(1)})`;
 }
 
@@ -360,8 +382,7 @@ function updateGPSPosition(position) {
     const iriCorrected = state.iriCount > 0 ? state.iriCorrectedAccum / state.iriCount : 0;
     state.currentDataPoints.push({
       timestamp: Date.now(),
-      lat: latitude,
-      lon: longitude,
+      lat: latitude, lon: longitude,
       speed: speedKmh,
       iri_measured: iriMeasured,
       iri_corrected: iriCorrected
@@ -386,6 +407,8 @@ function startMeasurement() {
   state.lastPosition = null;
   state.chartDataZ = [];
   state.chartDataIRI = [];
+  state.dynamicBuffer = [];
+  state.dynamicThresholds = null;
 
   document.getElementById('btnStart').classList.add('hidden');
   document.getElementById('pauseStopControls').classList.remove('hidden');
@@ -399,14 +422,12 @@ function startMeasurement() {
     if (state.currentMarker) state.mapMeasure.removeLayer(state.currentMarker);
     state.currentMarker = null;
   }
-
   if (state.sensorChart) {
     state.sensorChart.data.labels = [];
     state.sensorChart.data.datasets[0].data = [];
     state.sensorChart.data.datasets[1].data = [];
     state.sensorChart.update();
   }
-
   startGPS();
   startAccelerometer();
   updateTimer();
@@ -418,61 +439,47 @@ function pauseMeasurement() {
   document.getElementById('btnResume').classList.remove('hidden');
   if (window.accelerometer) window.accelerometer.stop();
 }
-
 function resumeMeasurement() {
   state.isPaused = false;
   document.getElementById('btnResume').classList.add('hidden');
   document.getElementById('pauseStopControls').classList.remove('hidden');
   if (window.accelerometer) window.accelerometer.start();
 }
-
 function stopMeasurement() {
   state.isMeasuring = false;
   state.isPaused = false;
   if (window.accelerometer) window.accelerometer.stop();
-  if (state.watchId) {
-    navigator.geolocation.clearWatch(state.watchId);
-    state.watchId = null;
-  }
+  if (state.watchId) { navigator.geolocation.clearWatch(state.watchId); state.watchId = null; }
   document.getElementById('pauseStopControls').classList.add('hidden');
   document.getElementById('btnResume').classList.add('hidden');
   document.getElementById('btnStart').classList.remove('hidden');
 
   if (state.currentDataPoints.length > 0) {
-    const segmentLength = config.segmentLength;
-    const segments = segmentizeRoute(state.currentDataPoints, segmentLength);
-
-    const allMeasured = state.currentDataPoints.map(p => p.iri_measured);
-    const allCorrected = state.currentDataPoints.map(p => p.iri_corrected);
-    const avgMeasured = allMeasured.reduce((a,b)=>a+b,0) / allMeasured.length;
-    const avgCorrected = allCorrected.reduce((a,b)=>a+b,0) / allCorrected.length;
-
-    const route = {
+    const segments = segmentizeRoute(state.currentDataPoints, config.segmentLength);
+    const allM = state.currentDataPoints.map(p => p.iri_measured);
+    const allC = state.currentDataPoints.map(p => p.iri_corrected);
+    saveRoute({
       id: Date.now().toString(),
       date: new Date().toISOString(),
       points: state.currentDataPoints,
-      segments: segments,
-      avgIRIMeasured: avgMeasured,
-      avgIRICorrected: avgCorrected,
+      segments,
+      avgIRIMeasured: allM.reduce((a,b)=>a+b,0) / allM.length,
+      avgIRICorrected: allC.reduce((a,b)=>a+b,0) / allC.length,
       totalDistance: state.totalDistance,
-      segmentLength: segmentLength
-    };
-    saveRoute(route);
-    showToast(`Ruta guardada. IRI corregido: ${avgCorrected.toFixed(2)}`);
+      segmentLength: config.segmentLength
+    });
+    showToast(`Ruta guardada. IRI corregido promedio: ${(allC.reduce((a,b)=>a+b,0)/allC.length).toFixed(2)}`);
   }
 }
 
 // ============ GPS Y ACELERÓMETRO ============
 function startGPS() {
   if ('geolocation' in navigator) {
-    state.watchId = navigator.geolocation.watchPosition(
-      updateGPSPosition,
+    state.watchId = navigator.geolocation.watchPosition(updateGPSPosition,
       err => showToast('Error GPS: ' + err.message),
-      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
-    );
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
   }
 }
-
 function startAccelerometer() {
   if ('Accelerometer' in window) {
     try {
@@ -485,22 +492,13 @@ function startAccelerometer() {
         }
       });
       window.accelerometer.start();
-    } catch (e) {
-      fallbackToDeviceMotion();
-    }
-  } else {
-    fallbackToDeviceMotion();
-  }
+    } catch(e) { fallbackToDeviceMotion(); }
+  } else { fallbackToDeviceMotion(); }
 }
-
 function fallbackToDeviceMotion() {
-  window.addEventListener('deviceorientation', (event) => {
+  window.addEventListener('deviceorientation', event => {
     if (state.isMeasuring && !state.isPaused) {
-      const accel = {
-        x: event.accelerationIncludingGravity?.x || 0,
-        y: event.accelerationIncludingGravity?.y || 0,
-        z: event.accelerationIncludingGravity?.z || 0
-      };
+      const accel = { x: event.accelerationIncludingGravity?.x||0, y: event.accelerationIncludingGravity?.y||0, z: event.accelerationIncludingGravity?.z||0 };
       state.rawAccelBuffer.push(accel);
       processAccelerometerData(accel);
     }
@@ -511,40 +509,27 @@ function fallbackToDeviceMotion() {
 function updateTimer() {
   if (state.isMeasuring && !state.isPaused) {
     const elapsed = Math.floor((Date.now() - state.measurementStartTime) / 1000);
-    const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-    const secs = (elapsed % 60).toString().padStart(2, '0');
+    const mins = Math.floor(elapsed/60).toString().padStart(2,'0');
+    const secs = (elapsed%60).toString().padStart(2,'0');
     document.getElementById('timeValue').textContent = `${mins}:${secs}`;
     setTimeout(updateTimer, 1000);
   }
 }
-
 function updateSegmentLabel() {
   const val = document.getElementById('segmentLength').value;
   document.getElementById('segmentLengthLabel').textContent = val + ' m';
   config.segmentLength = parseInt(val);
   saveConfig();
 }
-
 function switchTab(tabName) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  document.getElementById('tab-' + tabName).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  document.getElementById('tab-'+tabName).classList.add('active');
   document.querySelector(`.tab-btn[onclick*="${tabName}"]`).classList.add('active');
-
-  if (tabName === 'globalMap') {
-    setTimeout(() => {
-      if (state.mapGlobal) state.mapGlobal.invalidateSize();
-      updateGlobalMap();
-    }, 100);
-  }
-  if (tabName === 'history') {
-    loadHistory();
-  }
-  if (tabName === 'garage') {
-    loadGarage();
-  }
+  if (tabName==='globalMap') { setTimeout(()=>{ if(state.mapGlobal) state.mapGlobal.invalidateSize(); updateGlobalMap(); },100); }
+  if (tabName==='history') loadHistory();
+  if (tabName==='garage') loadGarage();
 }
-
 function toggleCalibration() {
   document.getElementById('calibrationPanel').classList.toggle('hidden');
   document.getElementById('coefA').value = config.coefA;
@@ -552,18 +537,16 @@ function toggleCalibration() {
   document.getElementById('coefAVal').textContent = config.coefA.toFixed(2);
   document.getElementById('coefBVal').textContent = config.coefB.toFixed(2);
 }
-
 function applyCalibration() {
   config.coefA = parseFloat(document.getElementById('coefA').value);
   config.coefB = parseFloat(document.getElementById('coefB').value);
   saveConfig();
   document.getElementById('calibrationPanel').classList.add('hidden');
   showToast('Calibración guardada');
-  // Si hay un vehículo activo que no coincide, desvincularlo
   if (state.activeVehicleId) {
     const allVehicles = getAllVehicles();
-    const current = allVehicles.find(v => v.id === state.activeVehicleId);
-    if (current && (Math.abs(current.coefA - config.coefA) > 0.05 || Math.abs(current.coefB - config.coefB) > 0.05)) {
+    const current = allVehicles.find(v=>v.id===state.activeVehicleId);
+    if (current && (Math.abs(current.coefA-config.coefA)>0.05 || Math.abs(current.coefB-config.coefB)>0.05)) {
       state.activeVehicleId = null;
       localStorage.removeItem('roadcheck_active_vehicle');
       document.getElementById('currentVehicleName').textContent = 'Personalizado';
@@ -574,30 +557,17 @@ function applyCalibration() {
 function showSettings() {
   const modal = document.createElement('div');
   modal.className = 'modal';
-  modal.innerHTML = `
-    <div class="modal-content">
-      <h3>Ajustes Avanzados</h3>
-      <div class="slider-container">
-        <label>Coef. corrección velocidad: <span id="speedKVal">${config.speedCorrectionK}</span></label>
-        <input type="range" id="speedK" min="0" max="0.05" step="0.001" value="${config.speedCorrectionK}">
-      </div>
-      <div class="slider-container">
-        <label>Velocidad referencia (km/h): <span id="refSpeedVal">${config.referenceSpeed}</span></label>
-        <input type="range" id="refSpeed" min="30" max="120" step="5" value="${config.referenceSpeed}">
-      </div>
-      <button class="btn btn-start" style="width:100%; margin-top:15px;" id="saveSettingsBtn">Guardar</button>
-      <button class="btn btn-secondary" style="width:100%; margin-top:5px;" onclick="this.closest('.modal').remove()">Cancelar</button>
-    </div>
-  `;
+  modal.innerHTML = `<div class="modal-content"><h3>Ajustes Avanzados</h3>
+    <label>Coef. corrección velocidad: <span id="speedKVal">${config.speedCorrectionK}</span></label>
+    <input type="range" id="speedK" min="0" max="0.05" step="0.001" value="${config.speedCorrectionK}"
+      oninput="document.getElementById('speedKVal').textContent=parseFloat(this.value).toFixed(3)">
+    <label>Velocidad referencia (km/h): <span id="refSpeedVal">${config.referenceSpeed}</span></label>
+    <input type="range" id="refSpeed" min="30" max="120" step="5" value="${config.referenceSpeed}"
+      oninput="document.getElementById('refSpeedVal').textContent=this.value">
+    <button class="btn btn-start" style="width:100%;margin-top:15px;" id="saveSettingsBtn">Guardar</button>
+    <button class="btn btn-secondary" style="width:100%;margin-top:5px;" onclick="this.closest('.modal').remove()">Cancelar</button></div>`;
   document.body.appendChild(modal);
-
-  document.getElementById('speedK').addEventListener('input', e => {
-    document.getElementById('speedKVal').textContent = parseFloat(e.target.value).toFixed(3);
-  });
-  document.getElementById('refSpeed').addEventListener('input', e => {
-    document.getElementById('refSpeedVal').textContent = e.target.value;
-  });
-  document.getElementById('saveSettingsBtn').addEventListener('click', () => {
+  document.getElementById('saveSettingsBtn').addEventListener('click', ()=>{
     config.speedCorrectionK = parseFloat(document.getElementById('speedK').value);
     config.referenceSpeed = parseInt(document.getElementById('refSpeed').value);
     saveConfig();
@@ -618,52 +588,37 @@ function updateVehicleDisplay(vehicle) {
 function loadGarage() {
   const allVehicles = getAllVehicles();
   const container = document.getElementById('garageList');
-
-  const categories = ['Compacto', 'Sedán', 'SUV', 'Deportivo', 'Personalizado'];
+  const categories = ['Compacto', 'Sedán', 'SUV', 'Deportivo', 'Pick-up', 'Personalizado'];
   let html = '';
-
   categories.forEach(cat => {
     const vehiclesInCat = allVehicles.filter(v => v.category === cat);
     if (vehiclesInCat.length > 0) {
       html += `<h4 style="margin:10px 0 5px; color:#e94560;">${cat}</h4>`;
       vehiclesInCat.forEach(v => {
         const isActive = state.activeVehicleId === v.id;
-        html += `
-          <div class="garage-item ${isActive ? 'active' : ''}" onclick="selectVehicle('${v.id}')">
-            <div>
-              <strong>${v.name}</strong><br>
-              <small>a: ${v.coefA.toFixed(2)} | b: ${v.coefB.toFixed(2)}</small>
-            </div>
-            <div>
-              ${v.id.startsWith('v') && !v.id.startsWith('vc') ? '' : `<button class="btn-small" onclick="event.stopPropagation(); deleteCustomVehicle('${v.id}')">🗑️</button>`}
-            </div>
-          </div>
-        `;
+        html += `<div class="garage-item ${isActive?'active':''}" onclick="selectVehicle('${v.id}')">
+          <div><strong>${v.name}</strong><br><small>a: ${v.coefA.toFixed(2)} | b: ${v.coefB.toFixed(2)}</small></div>
+          <div>${v.id.startsWith('vc') ? `<button class="btn-small" onclick="event.stopPropagation(); deleteCustomVehicle('${v.id}')">🗑️</button>` : ''}</div>
+        </div>`;
       });
     }
   });
-
   container.innerHTML = html;
 }
 
 function selectVehicle(vehicleId) {
-  const allVehicles = getAllVehicles();
-  const vehicle = allVehicles.find(v => v.id === vehicleId);
+  const vehicle = getAllVehicles().find(v => v.id === vehicleId);
   if (!vehicle) return;
-
-  config.coefA = vehicle.coefA;
-  config.coefB = vehicle.coefB;
-  state.activeVehicleId = vehicle.id;
-  localStorage.setItem('roadcheck_active_vehicle', vehicle.id);
+  config.coefA = vehicle.coefA; config.coefB = vehicle.coefB;
+  state.activeVehicleId = vehicleId;
+  localStorage.setItem('roadcheck_active_vehicle', vehicleId);
   saveConfig();
   updateVehicleDisplay(vehicle);
   loadGarage();
-  showToast(`Vehículo seleccionado: ${vehicle.name}`);
+  showToast(`Seleccionado: ${vehicle.name}`);
 }
-
 function showAddVehicleModal() {
   document.getElementById('addVehicleModal').classList.remove('hidden');
-  document.getElementById('vehicleModalTitle').textContent = 'Añadir vehículo personalizado';
   document.getElementById('vehicleName').value = '';
   document.getElementById('vehicleCoefA').value = config.coefA;
   document.getElementById('vehicleCoefB').value = config.coefB;
@@ -671,42 +626,23 @@ function showAddVehicleModal() {
   document.getElementById('vehicleCoefBVal').textContent = config.coefB.toFixed(2);
   document.getElementById('btnSaveVehicle').onclick = saveNewVehicle;
 }
-
-function closeVehicleModal() {
-  document.getElementById('addVehicleModal').classList.add('hidden');
-}
-
+function closeVehicleModal() { document.getElementById('addVehicleModal').classList.add('hidden'); }
 function saveNewVehicle() {
   const name = document.getElementById('vehicleName').value.trim();
-  if (!name) {
-    showToast('Introduce un nombre para el vehículo');
-    return;
-  }
+  if (!name) { showToast('Introduce un nombre'); return; }
   const coefA = parseFloat(document.getElementById('vehicleCoefA').value);
   const coefB = parseFloat(document.getElementById('vehicleCoefB').value);
-
-  const customVehicles = getCustomVehicles();
-  const newVehicle = {
-    id: 'vc' + Date.now(),
-    name: name,
-    category: 'Personalizado',
-    coefA: coefA,
-    coefB: coefB,
-    description: 'Vehículo personalizado'
-  };
-  customVehicles.push(newVehicle);
-  saveCustomVehicles(customVehicles);
+  const custom = getCustomVehicles();
+  custom.push({ id: 'vc'+Date.now(), name, category:'Personalizado', coefA, coefB, description:'Personalizado' });
+  saveCustomVehicles(custom);
   closeVehicleModal();
-  selectVehicle(newVehicle.id);
+  selectVehicle(custom[custom.length-1].id);
   loadGarage();
-  showToast('Vehículo guardado y seleccionado');
 }
-
 function deleteCustomVehicle(vehicleId) {
-  if (!vehicleId.startsWith('vc')) return; // No borrar predefinidos
-  let customVehicles = getCustomVehicles();
-  customVehicles = customVehicles.filter(v => v.id !== vehicleId);
-  saveCustomVehicles(customVehicles);
+  if (!vehicleId.startsWith('vc')) return;
+  let custom = getCustomVehicles().filter(v => v.id !== vehicleId);
+  saveCustomVehicles(custom);
   if (state.activeVehicleId === vehicleId) {
     state.activeVehicleId = null;
     localStorage.removeItem('roadcheck_active_vehicle');
@@ -720,159 +656,97 @@ function deleteCustomVehicle(vehicleId) {
 function loadHistory() {
   const routes = getAllRoutes();
   const container = document.getElementById('historyList');
-  if (routes.length === 0) {
-    container.innerHTML = '<p style="text-align:center;">No hay rutas guardadas</p>';
-    return;
-  }
-
+  if (routes.length===0) { container.innerHTML = '<p style="text-align:center;">No hay rutas guardadas</p>'; return; }
   container.innerHTML = routes.map(r => `
     <div class="history-item" onclick="viewRouteDetail('${r.id}')">
-      <div>
-        <strong>${formatDate(r.date)}</strong><br>
-        <small>${r.totalDistance.toFixed(0)} m | IRI corr: ${r.avgIRICorrected?.toFixed(2) || 'N/A'}</small>
-      </div>
+      <div><strong>${formatDate(r.date)}</strong><br><small>${r.totalDistance.toFixed(0)} m | IRI corr: ${r.avgIRICorrected?.toFixed(2)||'N/A'}</small></div>
       <div class="history-actions">
-        <button class="btn-small" onclick="event.stopPropagation(); exportRouteCSV('${r.id}')" title="Exportar CSV">📥</button>
-        <button class="btn-small" onclick="event.stopPropagation(); deleteRoute('${r.id}')" title="Borrar">🗑️</button>
+        <button class="btn-small" onclick="event.stopPropagation(); exportRouteCSV('${r.id}')">📥</button>
+        <button class="btn-small" onclick="event.stopPropagation(); deleteRoute('${r.id}')">🗑️</button>
       </div>
-    </div>
-  `).join('');
+    </div>`).join('');
 }
-
 let currentRouteId = null;
-
 function viewRouteDetail(id) {
-  const routes = getAllRoutes();
-  const route = routes.find(r => r.id === id);
+  const route = getAllRoutes().find(r=>r.id===id);
   if (!route) return;
-
   currentRouteId = id;
   document.getElementById('routeModalTitle').textContent = `Ruta del ${formatDate(route.date)}`;
   document.getElementById('routeDate').textContent = formatDate(route.date);
-  document.getElementById('routeDistance').textContent = route.totalDistance.toFixed(1) + ' m';
-  document.getElementById('routeIRIMeasuredAvg').textContent = route.avgIRIMeasured?.toFixed(2) || 'N/A';
-  document.getElementById('routeIRICorrectedAvg').textContent = route.avgIRICorrected?.toFixed(2) || 'N/A';
-
+  document.getElementById('routeDistance').textContent = route.totalDistance.toFixed(1)+' m';
+  document.getElementById('routeIRIMeasuredAvg').textContent = route.avgIRIMeasured?.toFixed(2)||'N/A';
+  document.getElementById('routeIRICorrectedAvg').textContent = route.avgIRICorrected?.toFixed(2)||'N/A';
   const segmentList = document.getElementById('routeSegmentList');
-  if (route.segments && route.segments.length > 0) {
-    segmentList.innerHTML = '<p><strong>Segmentos:</strong></p>' +
-      route.segments.map((seg, i) =>
-        `<div style="background:#0f3460; padding:5px; margin:3px 0; border-radius:4px; display:flex; align-items:center;">
-          <span style="background:${seg.color}; width:12px; height:12px; display:inline-block; margin-right:6px;"></span>
-          Seg ${i+1}: ${seg.distance.toFixed(0)}m | IRI med: ${seg.iriMeasuredAvg.toFixed(2)} | IRI corr: ${seg.iriCorrectedAvg.toFixed(2)}
-        </div>`
-      ).join('');
-  } else {
-    segmentList.innerHTML = '<p>No hay segmentos calculados.</p>';
-  }
-
+  if (route.segments?.length) {
+    segmentList.innerHTML = '<p><strong>Segmentos:</strong></p>'+route.segments.map((seg,i)=>
+      `<div style="background:#0f3460;padding:5px;margin:3px 0;border-radius:4px;display:flex;align-items:center;">
+        <span style="background:${seg.color};width:12px;height:12px;display:inline-block;margin-right:6px;"></span>
+        Seg ${i+1}: ${seg.distance.toFixed(0)}m | IRI corr: ${seg.iriCorrectedAvg.toFixed(2)}
+      </div>`).join('');
+  } else segmentList.innerHTML = '<p>No hay segmentos</p>';
   document.getElementById('routeModal').classList.remove('hidden');
 }
-
-function closeModal() {
-  document.getElementById('routeModal').classList.add('hidden');
-  currentRouteId = null;
-}
-
+function closeModal() { document.getElementById('routeModal').classList.add('hidden'); currentRouteId=null; }
 function deleteRoute(id) {
-  if (confirm('¿Eliminar esta ruta?')) {
+  if (confirm('¿Eliminar ruta?')) {
     deleteRouteById(id);
-    if (currentRouteId === id) closeModal();
+    if (currentRouteId===id) closeModal();
     loadHistory();
     showToast('Ruta eliminada');
   }
 }
-
 function clearAllHistory() {
-  if (confirm('¿Borrar TODAS las rutas?')) {
-    clearAllRoutes();
-    loadHistory();
-    showToast('Historial borrado');
-  }
+  if (confirm('¿Borrar todo?')) { clearAllRoutes(); loadHistory(); showToast('Historial borrado'); }
 }
-
 function exportRouteCSV(id) {
-  const routes = getAllRoutes();
-  const route = routes.find(r => r.id === id);
-  if (!route || !route.points) return;
-
+  const route = getAllRoutes().find(r=>r.id===id);
+  if (!route?.points) return;
   let csv = 'Timestamp,Lat,Long,Speed,IRI_Measured,IRI_Corrected\n';
-  route.points.forEach(p => {
-    csv += `${p.timestamp},${p.lat},${p.lon},${p.speed},${p.iri_measured},${p.iri_corrected}\n`;
-  });
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
+  route.points.forEach(p => csv += `${p.timestamp},${p.lat},${p.lon},${p.speed},${p.iri_measured},${p.iri_corrected}\n`);
+  const blob = new Blob([csv],{type:'text/csv'});
   const a = document.createElement('a');
-  a.href = url;
+  a.href = URL.createObjectURL(blob);
   a.download = `ruta_${id}.csv`;
   a.click();
-  URL.revokeObjectURL(url);
 }
 
 // ============ MAPA GLOBAL ============
 function updateGlobalMap() {
   if (!state.mapGlobal) return;
-
-  state.mapGlobal.eachLayer(layer => {
-    if (layer instanceof L.Polyline || layer instanceof L.CircleMarker) {
-      state.mapGlobal.removeLayer(layer);
-    }
-  });
-
+  state.mapGlobal.eachLayer(layer => { if (layer instanceof L.Polyline || layer instanceof L.CircleMarker) state.mapGlobal.removeLayer(layer); });
   const routes = getAllRoutes();
-  if (routes.length === 0) return;
-
+  if (!routes.length) return;
   const mode = document.getElementById('globalViewMode').value;
   let allSegments = [];
-
   routes.forEach(route => {
-    if (route.segments && route.segments.length > 0) {
-      route.segments.forEach(seg => {
-        const iri = mode === 'iri_measured' ? seg.iriMeasuredAvg : seg.iriCorrectedAvg;
-        allSegments.push({
-          ...seg,
-          routeId: route.id,
-          iri: iri
-        });
-      });
-    } else {
-      const points = route.points.map(p => [p.lat, p.lon]);
-      const iri = mode === 'iri_measured' ? route.avgIRIMeasured : route.avgIRICorrected;
-      L.polyline(points, { color: getIRIColor(iri), weight: 3, opacity: 0.7 }).addTo(state.mapGlobal);
+    if (route.segments?.length) route.segments.forEach(seg => {
+      allSegments.push({...seg, routeId:route.id, iri: mode==='iri_measured' ? seg.iriMeasuredAvg : seg.iriCorrectedAvg});
+    });
+    else {
+      const latlngs = route.points.map(p=>[p.lat,p.lon]);
+      const iri = mode==='iri_measured' ? route.avgIRIMeasured : route.avgIRICorrected;
+      L.polyline(latlngs,{color:getIRIColor(iri),weight:3,opacity:0.7}).addTo(state.mapGlobal);
     }
   });
-
   allSegments.forEach(seg => {
-    if (seg.points && seg.points.length >= 2) {
-      const latlngs = seg.points.map(p => [p.lat, p.lon]);
-      L.polyline(latlngs, {
-        color: getIRIColor(seg.iri),
-        weight: 5,
-        opacity: 0.8
-      }).addTo(state.mapGlobal).on('click', () => showSegmentInfo(seg));
+    if (seg.points?.length>=2) {
+      L.polyline(seg.points.map(p=>[p.lat,p.lon]),{color:getIRIColor(seg.iri),weight:5,opacity:0.8})
+        .addTo(state.mapGlobal).on('click',()=>showSegmentInfo(seg));
     }
   });
-
-  if (allSegments.length > 0) {
-    const allPoints = allSegments.flatMap(s => s.points.map(p => [p.lat, p.lon]));
-    if (allPoints.length > 0) {
-      state.mapGlobal.fitBounds(L.latLngBounds(allPoints), { padding: [20, 20] });
-    }
+  if (allSegments.length) {
+    const allP = allSegments.flatMap(s=>s.points.map(p=>[p.lat,p.lon]));
+    if (allP.length) state.mapGlobal.fitBounds(L.latLngBounds(allP),{padding:[20,20]});
   }
 }
-
 function showSegmentInfo(seg) {
-  const infoDiv = document.getElementById('segmentInfo');
-  infoDiv.classList.remove('hidden');
+  document.getElementById('segmentInfo').classList.remove('hidden');
   document.getElementById('segmentDetails').innerHTML = `
-    <p><strong>IRI Medido:</strong> ${seg.iriMeasuredAvg?.toFixed(2) || 'N/A'}</p>
-    <p><strong>IRI Corregido:</strong> ${seg.iriCorrectedAvg?.toFixed(2) || 'N/A'}</p>
-    <p><strong>Velocidad promedio:</strong> ${seg.speedAvg?.toFixed(1)} km/h</p>
+    <p><strong>IRI Medido:</strong> ${seg.iriMeasuredAvg?.toFixed(2)||'N/A'}</p>
+    <p><strong>IRI Corregido:</strong> ${seg.iriCorrectedAvg?.toFixed(2)||'N/A'}</p>
+    <p><strong>Velocidad prom.:</strong> ${seg.speedAvg?.toFixed(1)} km/h</p>
     <p><strong>Longitud:</strong> ${seg.distance?.toFixed(1)} m</p>
-    <p><strong>Ruta ID:</strong> ${seg.routeId}</p>
-    <button class="btn btn-secondary" onclick="viewRouteDetail('${seg.routeId}')">Ver ruta completa</button>
-  `;
+    <button class="btn btn-secondary" onclick="viewRouteDetail('${seg.routeId}')">Ver ruta completa</button>`;
 }
 
 // ============ INICIALIZACIÓN ============
@@ -880,26 +754,15 @@ document.addEventListener('DOMContentLoaded', () => {
   initMeasureMap();
   initGlobalMap();
   initSensorChart();
-
-  document.getElementById('coefA').addEventListener('input', e => {
-    document.getElementById('coefAVal').textContent = parseFloat(e.target.value).toFixed(2);
-  });
-  document.getElementById('coefB').addEventListener('input', e => {
-    document.getElementById('coefBVal').textContent = parseFloat(e.target.value).toFixed(2);
-  });
-
+  document.getElementById('coefA').addEventListener('input', e => document.getElementById('coefAVal').textContent = parseFloat(e.target.value).toFixed(2));
+  document.getElementById('coefB').addEventListener('input', e => document.getElementById('coefBVal').textContent = parseFloat(e.target.value).toFixed(2));
   document.getElementById('coefA').value = config.coefA;
   document.getElementById('coefB').value = config.coefB;
   document.getElementById('coefAVal').textContent = config.coefA.toFixed(2);
   document.getElementById('coefBVal').textContent = config.coefB.toFixed(2);
-
-  // Cargar nombre de vehículo activo
   const activeId = localStorage.getItem('roadcheck_active_vehicle');
   if (activeId) {
-    const allVehicles = getAllVehicles();
-    const vehicle = allVehicles.find(v => v.id === activeId);
-    if (vehicle) {
-      updateVehicleDisplay(vehicle);
-    }
+    const v = getAllVehicles().find(v=>v.id===activeId);
+    if (v) updateVehicleDisplay(v);
   }
 });
