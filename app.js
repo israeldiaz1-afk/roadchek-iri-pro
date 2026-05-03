@@ -1,0 +1,806 @@
+// ============ CONFIGURACIÓN GLOBAL ============
+const DEFAULT_CONFIG = {
+  coefA: 2.0,
+  coefB: 0.5,
+  speedCorrectionK: 0.015,
+  referenceSpeed: 80,
+  minSpeed: 5,
+  segmentLength: 100,
+  dynamicIRI: true,
+  calibrationWindow: 100,
+  noiseFloor: 0.05       // umbral de RMS por debajo del cual IRI = 0
+};
+
+let config = {...DEFAULT_CONFIG};
+let state = {
+  isMeasuring: false,
+  isPaused: false,
+  watchId: null,
+  lastPosition: null,
+  totalDistance: 0,
+  measurementStartTime: null,
+  currentDataPoints: [],
+  rawAccelBuffer: [],
+  iriMeasuredAccum: 0,
+  iriCorrectedAccum: 0,
+  iriCount: 0,
+  mapMeasure: null,
+  mapGlobal: null,
+  mapFullscreen: null,
+  measureRouteLine: null,
+  currentMarker: null,
+  fullscreenRouteLines: [],
+  currentSegmentLine: null,
+  currentSegmentPoints: [],
+  currentSegmentDistance: 0,
+  currentSegmentIRISum: 0,
+  currentSegmentPointCount: 0,
+  sensorChart: null,
+  chartDataZ: [],
+  chartDataIRI: [],
+  maxChartPoints: 60,
+  activeVehicleId: null,
+  dynamicBuffer: [],
+  dynamicThresholds: null,
+  orientationCalibrated: false,
+  gravityUnit: null,
+  gravityMagnitude: 9.8,
+  gravityCalibrationSamples: [],
+  calibrationStartTime: 0,
+  useDeviceOrientationFallback: false,
+  fullscreenFirstPoint: false,
+  dynActivated: false,
+  highSpeedStartTime: null,
+  requiredHighSpeedTime: 5000,
+  selectedRouteIds: new Set(),
+  showAverage: false,
+  sensorActive: false,
+  mapExpanded: false
+};
+
+let mapFilterRouteId = null;
+
+// ============ BASE DE DATOS DE VEHÍCULOS ============
+const VEHICLE_DATABASE = [
+  { id: 'v1', name: 'Toyota Corolla (2018-2024)', category: 'Compacto', coefA: 2.0, coefB: 0.50 },
+  { id: 'v2', name: 'Honda Civic (2016-2024)', category: 'Compacto', coefA: 2.1, coefB: 0.50 },
+  { id: 'v3', name: 'Volkswagen Golf (2020-2024)', category: 'Compacto', coefA: 2.05, coefB: 0.50 },
+  { id: 'v4', name: 'Renault Clio (2019-2024)', category: 'Compacto', coefA: 1.9, coefB: 0.45 },
+  { id: 'v17', name: 'SEAT Ibiza (2020-2024)', category: 'Compacto', coefA: 1.9, coefB: 0.45 },
+  { id: 'v18', name: 'Fiat 500 (2019-2024)', category: 'Compacto', coefA: 1.7, coefB: 0.40 },
+  { id: 'v19', name: 'Opel Corsa (2020-2024)', category: 'Compacto', coefA: 1.95, coefB: 0.45 },
+  { id: 'v5', name: 'BMW Serie 3 (2019-2024)', category: 'Sedán', coefA: 2.3, coefB: 0.55 },
+  { id: 'v6', name: 'Mercedes-Benz Clase C (2021-2024)', category: 'Sedán', coefA: 2.2, coefB: 0.50 },
+  { id: 'v7', name: 'Audi A4 (2020-2024)', category: 'Sedán', coefA: 2.25, coefB: 0.55 },
+  { id: 'v8', name: 'Tesla Model 3 (2021-2024)', category: 'Sedán', coefA: 2.4, coefB: 0.60 },
+  { id: 'v20', name: 'Ford Mondeo (2018-2024)', category: 'Sedán', coefA: 2.15, coefB: 0.50 },
+  { id: 'v21', name: 'Skoda Octavia (2020-2024)', category: 'Sedán', coefA: 2.05, coefB: 0.45 },
+  { id: 'v9', name: 'Toyota RAV4 (2019-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55 },
+  { id: 'v10', name: 'Honda CR-V (2020-2024)', category: 'SUV', coefA: 2.35, coefB: 0.55 },
+  { id: 'v11', name: 'Ford Explorer (2020-2024)', category: 'SUV', coefA: 2.6, coefB: 0.60 },
+  { id: 'v12', name: 'Volkswagen Tiguan (2021-2024)', category: 'SUV', coefA: 2.3, coefB: 0.50 },
+  { id: 'v22', name: 'Nissan Qashqai (2019-2024)', category: 'SUV', coefA: 2.3, coefB: 0.50 },
+  { id: 'v23', name: 'Kia Sportage (2022-2024)', category: 'SUV', coefA: 2.35, coefB: 0.50 },
+  { id: 'v24', name: 'Hyundai Tucson (2023-2024)', category: 'SUV', coefA: 2.2, coefB: 0.50 },
+  { id: 'v25', name: 'MG ZS (2020-2024)', category: 'SUV', coefA: 2.25, coefB: 0.50 },
+  { id: 'v26', name: 'DS 7 Crossback (2021-2024)', category: 'SUV', coefA: 2.1, coefB: 0.50 },
+  { id: 'v27', name: 'Peugeot 3008 (2021-2024)', category: 'SUV', coefA: 2.15, coefB: 0.50 },
+  { id: 'v28', name: 'Jeep Renegade (2021-2024)', category: 'SUV', coefA: 2.4, coefB: 0.55 },
+  { id: 'v13', name: 'Porsche 911 (2020-2024)', category: 'Deportivo', coefA: 2.9, coefB: 0.65 },
+  { id: 'v14', name: 'Ford Mustang (2018-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.60 },
+  { id: 'v15', name: 'Mazda MX-5 (2016-2024)', category: 'Deportivo', coefA: 2.8, coefB: 0.60 },
+  { id: 'v16', name: 'BMW M3 (2021-2024)', category: 'Deportivo', coefA: 3.0, coefB: 0.65 },
+  { id: 'v29', name: 'Subaru BRZ (2022-2024)', category: 'Deportivo', coefA: 2.75, coefB: 0.60 },
+  { id: 'v30', name: 'Toyota GR86 (2022-2024)', category: 'Deportivo', coefA: 2.7, coefB: 0.55 },
+  { id: 'v31', name: 'Ford Ranger (2019-2024)', category: 'Pick-up', coefA: 2.8, coefB: 0.65 },
+  { id: 'v32', name: 'Toyota Hilux (2020-2024)', category: 'Pick-up', coefA: 2.9, coefB: 0.65 },
+  { id: 'v33', name: 'Volkswagen Amarok (2021-2024)', category: 'Pick-up', coefA: 2.85, coefB: 0.60 },
+  { id: 'v34', name: 'Peugeot 307 SW (2002-2008)', category: 'Compacto', coefA: 2.15, coefB: 0.55 },
+  { id: 'v35', name: 'Volkswagen Passat (2012)', category: 'Sedán', coefA: 2.05, coefB: 0.50 },
+  { id: 'v36', name: 'Citroën e-C4 (2021-2024)', category: 'SUV', coefA: 1.65, coefB: 0.40 }
+];
+
+// ============ ESCALA DE COLORES ============
+function getIRIColor(iri) {
+  if (state.dynActivated && state.dynamicThresholds) {
+    const { low, high } = state.dynamicThresholds;
+    if (iri <= low) return '#10b981';
+    if (iri <= high) return '#f59e0b';
+    return '#ef4444';
+  }
+  if (iri <= 2) return '#10b981';
+  if (iri <= 4) return '#f59e0b';
+  if (iri <= 6) return '#f97316';
+  return '#ef4444';
+}
+
+function updateDynamicThresholds() {
+  if (state.dynamicBuffer.length < 10) return null;
+  const sum = state.dynamicBuffer.reduce((a,b)=>a+b,0);
+  const mean = sum / state.dynamicBuffer.length;
+  const sqDiff = state.dynamicBuffer.reduce((s,v)=>s+(v-mean)**2,0);
+  const stdDev = Math.sqrt(sqDiff / state.dynamicBuffer.length);
+  state.dynamicThresholds = { low: Math.max(0.5, mean - stdDev), high: mean + stdDev };
+  state.dynActivated = true;
+  return state.dynamicThresholds;
+}
+
+// ============ CARGA Y GUARDADO ============
+function loadConfig() {
+  const saved = localStorage.getItem('roadcheck_config');
+  if (saved) config = {...config, ...JSON.parse(saved)};
+  document.getElementById('segmentLength').value = config.segmentLength;
+  updateSegmentLabel();
+  const activeId = localStorage.getItem('roadcheck_active_vehicle');
+  if (activeId) {
+    const v = getAllVehicles().find(v=>v.id===activeId);
+    if (v) { config.coefA = v.coefA; config.coefB = v.coefB; state.activeVehicleId = v.id; updateVehicleDisplay(v); }
+  }
+}
+function saveConfig() { localStorage.setItem('roadcheck_config', JSON.stringify(config)); }
+function getAllVehicles() { return [...VEHICLE_DATABASE, ...JSON.parse(localStorage.getItem('roadcheck_custom_vehicles')||'[]')]; }
+function saveCustomVehicles(arr) { localStorage.setItem('roadcheck_custom_vehicles', JSON.stringify(arr)); }
+function getCustomVehicles() { return JSON.parse(localStorage.getItem('roadcheck_custom_vehicles')||'[]'); }
+loadConfig();
+
+// ============ MAPAS ============
+function initMeasureMap() {
+  state.mapMeasure = L.map('mapMeasure', { zoomControl: false, attributionControl: false }).setView([0,0],16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.mapMeasure);
+  state.measureRouteLine = L.polyline([], { color: '#f59e0b', weight: 4 }).addTo(state.mapMeasure);
+  document.getElementById('measMapContainer').addEventListener('click', toggleMapExpand);
+}
+function initGlobalMap() {
+  state.mapGlobal = L.map('mapGlobal', { zoomControl: true, attributionControl: false }).setView([0,0],13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(state.mapGlobal);
+}
+
+// ============ GRÁFICO DINÁMICO ============
+function initSensorChart() {
+  const ctx = document.getElementById('sensorChart').getContext('2d');
+  state.sensorChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Acel. Z (m/s²)',
+          data: [],
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59,130,246,0.08)',
+          yAxisID: 'y',
+          tension: 0.4,
+          pointRadius: 0,
+          segment: {
+            borderColor: ctx => {
+              const val = ctx.p1.raw || 0;
+              if (val < 0.5) return '#64748b';
+              if (val < 2) return '#3b82f6';
+              if (val < 5) return '#f59e0b';
+              return '#ef4444';
+            }
+          }
+        },
+        {
+          label: 'IRI Corregido',
+          data: [],
+          borderColor: '#f59e0b',
+          backgroundColor: 'rgba(245,158,11,0.08)',
+          yAxisID: 'y1',
+          tension: 0.4,
+          pointRadius: 0,
+          segment: {
+            borderColor: ctx => {
+              const val = ctx.p1.raw || 0;
+              return getIRIColor(val);
+            }
+          }
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      scales: {
+        x: { display: false },
+        y: { type: 'linear', display: true, position: 'left', min:0, grid:{color:'rgba(255,255,255,0.03)'}, ticks:{color:'#94a3b8',font:{family:'JetBrains Mono',size:10}} },
+        y1: { type: 'linear', display: true, position: 'right', min:0, max:10, grid:{drawOnChartArea:false}, ticks:{color:'#94a3b8',font:{family:'JetBrains Mono',size:10}} }
+      },
+      plugins: { legend: { labels: { color: '#94a3b8', font: { size: 10 } } } }
+    }
+  });
+}
+
+// ============ UTILIDADES ============
+function calculateDistance(lat1,lon1,lat2,lon2) {
+  const R=6371000, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+function calculateRMS(buf) { return buf.length ? Math.sqrt(buf.reduce((s,v)=>s+v*v,0)/buf.length) : 0; }
+function correctIRI(iri, spd) { return spd<config.minSpeed ? iri : iri*(1+config.speedCorrectionK*(config.referenceSpeed-spd)/config.referenceSpeed); }
+function formatDate(ts) { return new Date(ts).toLocaleString(); }
+function showToast(msg) {
+  const t=document.createElement('div');
+  t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:white;padding:10px 20px;border-radius:20px;z-index:2000;';
+  t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2000);
+}
+
+// ============ ALMACENAMIENTO DE RUTAS ============
+function saveRoute(r) {
+  const routes=JSON.parse(localStorage.getItem('roadcheck_routes')||'[]'); routes.push(r);
+  localStorage.setItem('roadcheck_routes',JSON.stringify(routes));
+}
+function getAllRoutes() { return JSON.parse(localStorage.getItem('roadcheck_routes')||'[]'); }
+function deleteRouteById(id) { localStorage.setItem('roadcheck_routes', JSON.stringify(getAllRoutes().filter(r=>r.id!==id))); }
+function clearAllRoutes() { localStorage.removeItem('roadcheck_routes'); }
+
+// ============ SEGMENTACIÓN ============
+function segmentizeRoute(points, len) {
+  const segs=[]; if(points.length<2) return segs;
+  let cur={pts:[],ms:0,cs:0,ss:0,n:0}, d=0;
+  for(let i=1;i<points.length;i++) {
+    const p=points[i-1],c=points[i];
+    d+=calculateDistance(p.lat,p.lon,c.lat,c.lon);
+    cur.pts.push(c); cur.ms+=c.iri_measured; cur.cs+=c.iri_corrected; cur.ss+=c.speed; cur.n++;
+    if(d>=len||i===points.length-1) {
+      const avgC=cur.cs/cur.n;
+      segs.push({points:[...cur.pts], iriMeasuredAvg:cur.ms/cur.n, iriCorrectedAvg:avgC, speedAvg:cur.ss/cur.n, distance:d, color:getIRIColor(avgC)});
+      cur={pts:[],ms:0,cs:0,ss:0,n:0}; d=0;
+    }
+  }
+  return segs;
+}
+
+// ============ MEDICIÓN EN TIEMPO REAL (IRI SIEMPRE VISIBLE Y FORZADO A CERO EN REPOSO) ============
+function processAccelerometerData(verticalAccel) {
+  // Filtro de ruido: si la aceleración es muy pequeña, se ignora
+  if (Math.abs(verticalAccel) < config.noiseFloor) verticalAccel = 0;
+
+  state.rawAccelBuffer.push(verticalAccel);
+  if(state.rawAccelBuffer.length>50) state.rawAccelBuffer.shift();
+
+  const rms=calculateRMS(state.rawAccelBuffer);
+  // Si el RMS es menor que el umbral, forzar IRI = 0 (evita el offset de 0.5 en reposo)
+  const iriMeasured = (rms < config.noiseFloor) ? 0 : config.coefA * rms + config.coefB;
+  const speed=state.lastPosition?.speed||0;
+  const iriCorrected=correctIRI(iriMeasured, speed);
+
+  // Mostrar IRI continuamente una vez calibrada la orientación (sin necesidad de iniciar medición)
+  if (state.orientationCalibrated) {
+    document.getElementById('iriMeasured').textContent=iriMeasured.toFixed(2);
+    document.getElementById('iriCorrected').textContent=iriCorrected.toFixed(2);
+  }
+
+  if (state.isMeasuring) {
+    updateQualityIndicator(iriCorrected);
+
+    if (speed >= config.minSpeed) {
+      state.dynamicBuffer.push(iriCorrected);
+      if (!state.dynActivated && state.totalDistance >= 100) {
+        if (speed >= 20) {
+          if (!state.highSpeedStartTime) state.highSpeedStartTime = Date.now();
+          else if (Date.now() - state.highSpeedStartTime >= state.requiredHighSpeedTime) updateDynamicThresholds();
+        } else state.highSpeedStartTime = null;
+      }
+    }
+    state.iriMeasuredAccum+=iriMeasured;
+    state.iriCorrectedAccum+=iriCorrected;
+    state.iriCount++;
+  }
+
+  // Gráfico siempre actualizado
+  state.chartDataZ.push(verticalAccel); state.chartDataIRI.push(iriCorrected);
+  if(state.chartDataZ.length>state.maxChartPoints){state.chartDataZ.shift(); state.chartDataIRI.shift();}
+  if(state.sensorChart){
+    state.sensorChart.data.labels=state.chartDataZ.map((_,i)=>i);
+    state.sensorChart.data.datasets[0].data=state.chartDataZ;
+    state.sensorChart.data.datasets[1].data=state.chartDataIRI;
+    state.sensorChart.update('none');
+  }
+}
+
+function updateQualityIndicator(iri) {
+  const el=document.getElementById('qualityIndicator');
+  el.classList.remove('hidden');
+  const c=getIRIColor(iri);
+  el.style.background=c==='#10b981'?'#065f46':c==='#f59e0b'?'#92400e':'#991b1b';
+  el.textContent=(c==='#10b981'?'Bueno':c==='#f59e0b'?'Regular':'Malo')+` (${iri.toFixed(1)})`;
+}
+
+function updateGPSPosition(pos) {
+  const {latitude,longitude,speed}=pos.coords;
+  const kmh=speed?speed*3.6:0;
+  document.getElementById('speedValue').textContent=kmh.toFixed(1)+' km/h';
+  if(state.lastPosition){
+    const dist=calculateDistance(state.lastPosition.lat,state.lastPosition.lon,latitude,longitude);
+    if (dist > 0.5) {
+      state.totalDistance+=dist;
+      document.getElementById('distanceValue').textContent=state.totalDistance.toFixed(1)+' m';
+    }
+    if(state.mapMeasure){
+      if(!state.currentMarker){ state.currentMarker=L.marker([latitude,longitude]).addTo(state.mapMeasure); state.mapMeasure.setView([latitude,longitude],17); }
+      else { state.currentMarker.setLatLng([latitude,longitude]); state.mapMeasure.panTo([latitude,longitude]); }
+      state.measureRouteLine.addLatLng([latitude,longitude]);
+    }
+  } else {
+    if(state.mapMeasure && !state.currentMarker) {
+      state.currentMarker = L.marker([latitude,longitude]).addTo(state.mapMeasure);
+      state.mapMeasure.setView([latitude,longitude], 17);
+    }
+  }
+  state.lastPosition={lat:latitude,lon:longitude,speed:kmh};
+
+  if(state.isMeasuring && !state.isPaused && state.orientationCalibrated) {
+    if(!state.currentSegmentIRISum) state.currentSegmentIRISum=0;
+    if(!state.currentSegmentPointCount) state.currentSegmentPointCount=0;
+    const currentIRI = state.iriCorrectedAccum / Math.max(1, state.iriCount);
+    state.currentSegmentIRISum += currentIRI; state.currentSegmentPointCount++;
+    if(state.iriCount>0){
+      state.currentDataPoints.push({timestamp:Date.now(), lat:latitude, lon:longitude, speed:kmh, iri_measured:state.iriMeasuredAccum/state.iriCount, iri_corrected:state.iriCorrectedAccum/state.iriCount});
+      state.iriMeasuredAccum=0; state.iriCorrectedAccum=0; state.iriCount=0;
+    }
+  }
+}
+
+// ============ CALIBRACIÓN DE ORIENTACIÓN ============
+function startOrientationCalibration() {
+  state.orientationCalibrated=false; state.gravityUnit=null; state.gravityCalibrationSamples=[]; state.calibrationStartTime=Date.now();
+  document.getElementById('calibrationStatus').classList.remove('hidden');
+  document.getElementById('calStatusText').textContent = 'Calibrando... no muevas el móvil';
+  showToast('Calibrando posición del teléfono...');
+}
+function addCalibrationSample(x,y,z) {
+  if(state.orientationCalibrated) return;
+  const samples=state.gravityCalibrationSamples;
+  if(samples.length>0){ const last=samples[samples.length-1]; if(Math.abs(x-last.x)+Math.abs(y-last.y)+Math.abs(z-last.z)>0.3) return; }
+  samples.push({x,y,z});
+  if(Date.now()-state.calibrationStartTime>=2000||samples.length>=120) finalizeCalibration();
+}
+function finalizeCalibration() {
+  const s=state.gravityCalibrationSamples; if(!s.length) return;
+  let mx=0,my=0,mz=0; s.forEach(v=>{mx+=v.x;my+=v.y;mz+=v.z;});
+  mx/=s.length; my/=s.length; mz/=s.length;
+  const mag=Math.sqrt(mx*mx+my*my+mz*mz); if(mag<0.5){showToast('Error en calibración, reintenta');return;}
+  state.gravityUnit={x:mx/mag,y:my/mag,z:mz/mag}; state.gravityMagnitude=mag; state.orientationCalibrated=true; state.gravityCalibrationSamples=[];
+  document.getElementById('calibrationStatus').classList.add('hidden');
+  showToast('✅ Calibración completada. Puedes empezar a medir.');
+}
+
+// ============ ACELERÓMETRO ============
+function startAccelerometer() {
+  if (state.sensorActive) return;
+  state.sensorActive = true;
+  startOrientationCalibration();
+  if('Accelerometer' in window) {
+    try {
+      window.accelerometer=new Accelerometer({frequency:60, includeGravity:true});
+      window.accelerometer.addEventListener('reading',()=>{
+        if(!state.sensorActive) return;
+        const {x,y,z}=window.accelerometer;
+        if(!state.orientationCalibrated) addCalibrationSample(x,y,z);
+        else { const g=state.gravityUnit; processAccelerometerData(Math.abs(x*g.x+y*g.y+z*g.z-state.gravityMagnitude)); }
+      });
+      window.accelerometer.start(); state.useDeviceOrientationFallback=false;
+    }catch(e){ fallbackToDeviceMotion(); }
+  } else { fallbackToDeviceMotion(); }
+}
+function fallbackToDeviceMotion() {
+  state.useDeviceOrientationFallback=true;
+  window.addEventListener('deviceorientation', handleDeviceOrientation);
+}
+function handleDeviceOrientation(event) {
+  if(!state.sensorActive) return;
+  const {x,y,z}=event.accelerationIncludingGravity||{x:0,y:0,z:0};
+  if(!state.orientationCalibrated) addCalibrationSample(x,y,z);
+  else { const g=state.gravityUnit; processAccelerometerData(Math.abs(x*g.x+y*g.y+z*g.z-state.gravityMagnitude)); }
+}
+
+// ============ GPS ============
+function startGPS() {
+  if (state.watchId) return;
+  if('geolocation' in navigator) {
+    state.watchId = navigator.geolocation.watchPosition(updateGPSPosition,
+      err => showToast('Error GPS: '+err.message),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 });
+  }
+}
+
+// ============ MAPA EXPANDIBLE ============
+function toggleMapExpand() {
+  const mapContainer = document.getElementById('measMapContainer');
+  if (!mapContainer) return;
+  if (!state.mapExpanded) {
+    mapContainer.style.position = 'fixed';
+    mapContainer.style.top = '0';
+    mapContainer.style.left = '0';
+    mapContainer.style.width = '100vw';
+    mapContainer.style.height = '100vh';
+    mapContainer.style.zIndex = '4000';
+    state.mapExpanded = true;
+    state.mapMeasure.invalidateSize();
+  } else {
+    mapContainer.style.position = '';
+    mapContainer.style.top = '';
+    mapContainer.style.left = '';
+    mapContainer.style.width = '';
+    mapContainer.style.height = '180px';
+    mapContainer.style.zIndex = '';
+    state.mapExpanded = false;
+    state.mapMeasure.invalidateSize();
+  }
+}
+
+// ============ CONTROL DE MEDICIÓN ============
+function startMeasurement() {
+  state.isMeasuring=true; state.isPaused=false; state.measurementStartTime=Date.now(); state.totalDistance=0;
+  state.currentDataPoints=[]; state.rawAccelBuffer=[]; state.iriMeasuredAccum=0; state.iriCorrectedAccum=0; state.iriCount=0;
+  state.dynamicBuffer=[]; state.dynamicThresholds=null; state.dynActivated=false; state.highSpeedStartTime=null;
+  document.getElementById('btnStart').classList.add('hidden');
+  document.getElementById('pauseStopControls').classList.remove('hidden');
+  document.getElementById('btnResume').classList.add('hidden');
+  document.getElementById('qualityIndicator').classList.add('hidden');
+  updateTimer();
+}
+function pauseMeasurement() {
+  state.isPaused=true;
+  document.getElementById('pauseStopControls').classList.add('hidden');
+  document.getElementById('btnResume').classList.remove('hidden');
+}
+function resumeMeasurement() {
+  state.isPaused=false;
+  document.getElementById('btnResume').classList.add('hidden');
+  document.getElementById('pauseStopControls').classList.remove('hidden');
+}
+function stopMeasurement() {
+  state.isMeasuring=false; state.isPaused=false;
+  document.getElementById('pauseStopControls').classList.add('hidden');
+  document.getElementById('btnResume').classList.add('hidden');
+  document.getElementById('btnStart').classList.remove('hidden');
+  if(state.currentDataPoints.length>0){
+    const segs=segmentizeRoute(state.currentDataPoints, config.segmentLength);
+    const allM=state.currentDataPoints.map(p=>p.iri_measured), allC=state.currentDataPoints.map(p=>p.iri_corrected);
+    const route={id:Date.now().toString(), date:new Date().toISOString(), points:state.currentDataPoints, segments:segs, avgIRIMeasured:allM.reduce((a,b)=>a+b,0)/allM.length, avgIRICorrected:allC.reduce((a,b)=>a+b,0)/allC.length, totalDistance:state.totalDistance, segmentLength:config.segmentLength};
+    saveRoute(route); showToast(`Ruta guardada. IRI corregido: ${route.avgIRICorrected.toFixed(2)}`);
+  }
+}
+
+// ============ INTERFAZ ============
+function updateTimer() {
+  if(state.isMeasuring&&!state.isPaused){
+    const el=Math.floor((Date.now()-state.measurementStartTime)/1000);
+    document.getElementById('timeValue').textContent=`${Math.floor(el/60).toString().padStart(2,'0')}:${(el%60).toString().padStart(2,'0')}`;
+    setTimeout(updateTimer,1000);
+  }
+}
+function updateSegmentLabel(){const v=document.getElementById('segmentLength').value;document.getElementById('segmentLengthLabel').textContent=v+' m';config.segmentLength=parseInt(v);saveConfig();}
+function switchTab(tab) {
+  document.querySelectorAll('.nav-tab').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  document.querySelector(`.nav-tab[onclick*="${tab}"]`).classList.add('active');
+  if(tab==='globalMap'){setTimeout(()=>{if(state.mapGlobal)state.mapGlobal.invalidateSize();loadGlobalMapTab();updateGlobalMap();},100);}
+  if(tab==='history') loadHistory();
+  if(tab==='garage') loadGarage();
+}
+function calibratePhonePosition() {
+  if (state.sensorActive) startOrientationCalibration();
+  else showToast('El sensor no está activo. Reinicia la app.');
+}
+function showSettings(){
+  const modal=document.createElement('div'); modal.className='modal-overlay';
+  modal.innerHTML=`<div class="modal-box"><h3>Ajustes</h3>
+    <h4 style="margin-top:10px;">Corrección por velocidad</h4>
+    <label>Coef. k: <span id="speedKVal">${config.speedCorrectionK}</span></label>
+    <input type="range" id="speedK" min="0" max="0.05" step="0.001" value="${config.speedCorrectionK}" oninput="document.getElementById('speedKVal').textContent=parseFloat(this.value).toFixed(3)">
+    <label>Velocidad ref. (km/h): <span id="refSpeedVal">${config.referenceSpeed}</span></label>
+    <input type="range" id="refSpeed" min="30" max="120" step="5" value="${config.referenceSpeed}" oninput="document.getElementById('refSpeedVal').textContent=this.value">
+    <h4 style="margin-top:15px;">Parámetros del vehículo</h4>
+    <p class="text-muted">Actual: <strong id="settingsVehicleName">${state.activeVehicleId ? (getAllVehicles().find(v=>v.id===state.activeVehicleId)?.name || 'Personalizado') : 'Personalizado'}</strong></p>
+    <label>Coef. Suspensión (a): <span id="coefAVal2">${config.coefA.toFixed(2)}</span></label>
+    <input type="range" id="coefA2" min="0.5" max="5.0" step="0.05" value="${config.coefA}" oninput="document.getElementById('coefAVal2').textContent=parseFloat(this.value).toFixed(2)">
+    <label>Offset (b): <span id="coefBVal2">${config.coefB.toFixed(2)}</span></label>
+    <input type="range" id="coefB2" min="0.0" max="3.0" step="0.05" value="${config.coefB}" oninput="document.getElementById('coefBVal2').textContent=parseFloat(this.value).toFixed(2)">
+    <button class="btn btn-primary" style="width:100%;margin-top:15px;" id="saveSettingsBtn">Guardar</button>
+    <button class="btn btn-secondary" style="width:100%;margin-top:5px;" onclick="this.closest('.modal-overlay').remove()">Cancelar</button></div>`;
+  document.body.appendChild(modal);
+  document.getElementById('saveSettingsBtn').addEventListener('click',()=>{
+    config.speedCorrectionK=parseFloat(document.getElementById('speedK').value);
+    config.referenceSpeed=parseInt(document.getElementById('refSpeed').value);
+    config.coefA=parseFloat(document.getElementById('coefA2').value);
+    config.coefB=parseFloat(document.getElementById('coefB2').value);
+    saveConfig();
+    if(state.activeVehicleId){
+      const cur=getAllVehicles().find(v=>v.id===state.activeVehicleId);
+      if(cur&&(Math.abs(cur.coefA-config.coefA)>0.05||Math.abs(cur.coefB-config.coefB)>0.05)){
+        state.activeVehicleId=null; localStorage.removeItem('roadcheck_active_vehicle');
+      }
+    }
+    modal.remove(); showToast('Ajustes guardados');
+  });
+}
+function updateVehicleDisplay(v){
+  document.getElementById('currentVehicleName').textContent=v?v.name:'Personalizado';
+  const a2=document.getElementById('coefA2'), b2=document.getElementById('coefB2');
+  if(a2) a2.value=config.coefA;
+  if(b2) b2.value=config.coefB;
+  document.getElementById('coefAVal').textContent=config.coefA.toFixed(2);
+  document.getElementById('coefBVal').textContent=config.coefB.toFixed(2);
+}
+
+// ============ GARAJE ============
+function loadGarage(){
+  const all=getAllVehicles();
+  const cats=['Compacto','Sedán','SUV','Deportivo','Pick-up','Personalizado'];
+  let html='';
+  cats.forEach(cat=>{
+    const vehs=all.filter(v=>v.category===cat);
+    if(vehs.length){
+      html+=`<h4 style="margin:10px 0 5px;color:#f59e0b;">${cat}</h4>`;
+      vehs.forEach(v=>{
+        const act=state.activeVehicleId===v.id;
+        html+=`<div class="list-item ${act?'active':''}" onclick="selectVehicle('${v.id}')">
+          <div><strong>${v.name}</strong><br><small>a: ${v.coefA.toFixed(2)} | b: ${v.coefB.toFixed(2)}</small></div>
+          <div>${v.id.startsWith('vc')?`<button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteCustomVehicle('${v.id}')">🗑️</button>`:''}</div>
+        </div>`;
+      });
+    }
+  });
+  document.getElementById('garageList').innerHTML=html;
+}
+function selectVehicle(id){
+  const v=getAllVehicles().find(v=>v.id===id);
+  if(!v)return;
+  config.coefA=v.coefA; config.coefB=v.coefB;
+  state.activeVehicleId=id; localStorage.setItem('roadcheck_active_vehicle',id);
+  saveConfig(); updateVehicleDisplay(v); loadGarage();
+  showToast(`Seleccionado: ${v.name}`);
+}
+function showAddVehicleModal(){
+  document.getElementById('addVehicleModal').classList.remove('hidden');
+  document.getElementById('vehicleName').value='';
+  document.getElementById('vehicleCoefA').value=config.coefA;
+  document.getElementById('vehicleCoefB').value=config.coefB;
+  document.getElementById('vehicleCoefAVal').textContent=config.coefA.toFixed(2);
+  document.getElementById('vehicleCoefBVal').textContent=config.coefB.toFixed(2);
+  document.getElementById('btnSaveVehicle').onclick=saveNewVehicle;
+}
+function closeVehicleModal(){document.getElementById('addVehicleModal').classList.add('hidden');}
+function saveNewVehicle(){
+  const name=document.getElementById('vehicleName').value.trim();
+  if(!name){showToast('Introduce un nombre');return;}
+  const a=parseFloat(document.getElementById('vehicleCoefA').value);
+  const b=parseFloat(document.getElementById('vehicleCoefB').value);
+  const cust=getCustomVehicles();
+  cust.push({id:'vc'+Date.now(),name,category:'Personalizado',coefA:a,coefB:b,description:'Personalizado'});
+  saveCustomVehicles(cust); closeVehicleModal();
+  selectVehicle(cust[cust.length-1].id); loadGarage();
+}
+function deleteCustomVehicle(id){
+  if(!id.startsWith('vc'))return;
+  let cust=getCustomVehicles().filter(v=>v.id!==id);
+  saveCustomVehicles(cust);
+  if(state.activeVehicleId===id){
+    state.activeVehicleId=null; localStorage.removeItem('roadcheck_active_vehicle');
+    document.getElementById('currentVehicleName').textContent='Personalizado';
+  }
+  loadGarage(); showToast('Vehículo eliminado');
+}
+
+// ============ HISTORIAL ============
+function loadHistory(){
+  const routes=getAllRoutes();
+  const cont=document.getElementById('historyList');
+  if(!routes.length){cont.innerHTML='<p class="text-muted" style="text-align:center;">No hay rutas guardadas</p>';return;}
+  cont.innerHTML=routes.map(r=>`
+    <div class="list-item" onclick="viewRouteDetail('${r.id}')">
+      <div><strong>${formatDate(r.date)}</strong><br><small>${r.totalDistance.toFixed(0)} m | IRI corr: ${r.avgIRICorrected?.toFixed(2)||'N/A'}</small></div>
+      <div class="history-actions">
+        <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();exportRouteCSV('${r.id}')">📥</button>
+        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation();deleteRoute('${r.id}')">🗑️</button>
+      </div>
+    </div>`).join('');
+}
+let currentRouteId=null;
+function viewRouteDetail(id){
+  const r=getAllRoutes().find(r=>r.id===id);
+  if(!r)return;
+  currentRouteId=id;
+  document.getElementById('routeModalTitle').textContent=`Ruta del ${formatDate(r.date)}`;
+  document.getElementById('routeDate').textContent=formatDate(r.date);
+  document.getElementById('routeDistance').textContent=r.totalDistance.toFixed(1)+' m';
+  document.getElementById('routeIRIMeasuredAvg').textContent=r.avgIRIMeasured?.toFixed(2)||'N/A';
+  document.getElementById('routeIRICorrectedAvg').textContent=r.avgIRICorrected?.toFixed(2)||'N/A';
+  const segList=document.getElementById('routeSegmentList');
+  if(r.segments?.length){
+    segList.innerHTML='<p><strong>Segmentos:</strong></p>'+r.segments.map((seg,i)=>
+      `<div style="background:rgba(0,0,0,0.2);padding:5px;margin:3px 0;border-radius:8px;display:flex;align-items:center;">
+        <span style="background:${seg.color};width:12px;height:12px;display:inline-block;margin-right:6px;border-radius:2px;"></span>
+        Seg ${i+1}: ${seg.distance.toFixed(0)}m | IRI corr: ${seg.iriCorrectedAvg.toFixed(2)}
+      </div>`).join('');
+  }else segList.innerHTML='<p>No hay segmentos</p>';
+  const footer=document.querySelector('#routeModal .controls');
+  if(footer){
+    footer.innerHTML=`
+      <button class="btn btn-sm btn-primary" onclick="exportRouteCSV('${r.id}')">📥 CSV</button>
+      <button class="btn btn-sm btn-accent" onclick="exportRouteGeoJSON('${r.id}')">🗺️ GeoJSON</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteRoute('${r.id}')">🗑️ Borrar</button>
+      <button class="btn btn-sm btn-secondary" onclick="showRouteOnGlobalMap('${r.id}')">📍 Ver en mapa</button>
+      <button class="btn btn-sm btn-secondary" onclick="closeModal()">Cerrar</button>`;
+  }
+  document.getElementById('routeModal').classList.remove('hidden');
+}
+function closeModal(){document.getElementById('routeModal').classList.add('hidden');currentRouteId=null;}
+function deleteRoute(id){
+  if(confirm('¿Eliminar ruta?')){
+    deleteRouteById(id);
+    if(currentRouteId===id)closeModal();
+    loadHistory(); showToast('Ruta eliminada');
+  }
+}
+function clearAllHistory(){
+  if(confirm('¿Borrar todo?')){clearAllRoutes();loadHistory();showToast('Historial borrado');}
+}
+function exportRouteCSV(id){
+  const r=getAllRoutes().find(r=>r.id===id);
+  if(!r?.points)return;
+  let csv='Timestamp,Lat,Long,Speed,IRI_Measured,IRI_Corrected\n';
+  r.points.forEach(p=>csv+=`${p.timestamp},${p.lat},${p.lon},${p.speed},${p.iri_measured},${p.iri_corrected}\n`);
+  const blob=new Blob([csv],{type:'text/csv'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=`ruta_${id}.csv`; a.click();
+}
+function exportRouteGeoJSON(id){
+  const r=getAllRoutes().find(r=>r.id===id);
+  if(!r?.points){showToast('No hay datos');return;}
+  const feats=[];
+  if(r.points.length>1)
+    feats.push({type:'Feature',properties:{id:r.id,fecha:r.date,distancia_total_m:r.totalDistance,iri_medido_prom:r.avgIRIMeasured,iri_corregido_prom:r.avgIRICorrected,tipo:'ruta_completa'},geometry:{type:'LineString',coordinates:r.points.map(p=>[p.lon,p.lat])}});
+  if(r.segments) r.segments.forEach((seg,i)=>{
+    if(seg.points?.length>=2)
+      feats.push({type:'Feature',properties:{id:r.id,segmento:i+1,distancia_m:seg.distance,iri_medido_prom:seg.iriMeasuredAvg,iri_corregido_prom:seg.iriCorrectedAvg,velocidad_media:seg.speedAvg,color_hex:seg.color,tipo:'segmento'},geometry:{type:'LineString',coordinates:seg.points.map(p=>[p.lon,p.lat])}});
+  });
+  r.points.forEach(p=>
+    feats.push({type:'Feature',properties:{id:r.id,timestamp:new Date(p.timestamp).toISOString(),lat:p.lat,lon:p.lon,speed_kmh:p.speed,iri_measured:p.iri_measured,iri_corrected:p.iri_corrected,tipo:'punto'},geometry:{type:'Point',coordinates:[p.lon,p.lat]}}));
+  const geo={type:'FeatureCollection',features:feats};
+  const blob=new Blob([JSON.stringify(geo,null,2)],{type:'application/geo+json'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=`ruta_${id}.geojson`; a.click();
+  showToast('GeoJSON exportado');
+}
+
+// ============ MAPA GLOBAL CON VISUALIZACIÓN ============
+function showRouteOnGlobalMap(rid){mapFilterRouteId=rid;switchTab('globalMap');setTimeout(()=>{if(state.mapGlobal)state.mapGlobal.invalidateSize();updateGlobalMap();},150);}
+function loadGlobalMapTab(){
+  const routes=getAllRoutes();
+  const container=document.getElementById('routeCheckboxes');
+  if(!container)return;
+  let html='';
+  routes.forEach(r=>{
+    const checked=state.selectedRouteIds.has(r.id)?'checked':'';
+    html+=`<label class="custom-checkbox"><input type="checkbox" value="${r.id}" ${checked} onchange="handleRouteCheckbox(this)"> ${formatDate(r.date)} (${r.totalDistance.toFixed(0)} m)</label>`;
+  });
+  container.innerHTML=html;
+}
+function handleRouteCheckbox(cb){
+  if(cb.checked) state.selectedRouteIds.add(cb.value);
+  else state.selectedRouteIds.delete(cb.value);
+  refreshGlobalMap();
+}
+function toggleAllRoutes(selectAll){
+  const cbs=document.querySelectorAll('#routeCheckboxes input[type=checkbox]');
+  cbs.forEach(cb=>{
+    cb.checked=selectAll;
+    if(selectAll) state.selectedRouteIds.add(cb.value);
+    else state.selectedRouteIds.delete(cb.value);
+  });
+  refreshGlobalMap();
+}
+function toggleAverageOverlaps(){
+  state.showAverage = !state.showAverage;
+  updateAverageButton();
+  refreshGlobalMap();
+}
+function updateAverageButton(){
+  const btn = document.getElementById('avgToggleBtn');
+  if (!btn) return;
+  if (state.showAverage) {
+    btn.textContent = 'Promediar: ON';
+    btn.classList.remove('btn-secondary');
+    btn.classList.add('btn-success');
+  } else {
+    btn.textContent = 'Promediar';
+    btn.classList.remove('btn-success');
+    btn.classList.add('btn-secondary');
+  }
+}
+function refreshGlobalMap(){ updateGlobalMap(); }
+
+function updateGlobalMap(){
+  if(!state.mapGlobal)return;
+  state.mapGlobal.eachLayer(l=>{if(l instanceof L.Polyline||l instanceof L.CircleMarker)state.mapGlobal.removeLayer(l);});
+  const routes=getAllRoutes();if(!routes.length)return;
+  const selectedRoutes=routes.filter(r=>state.selectedRouteIds.has(r.id));
+  if(!selectedRoutes.length)return;
+  const mode=document.getElementById('globalViewMode')?.value||'iri_corrected';
+
+  if(state.showAverage){
+    const overlapped=computeOverlappedSegments(selectedRoutes,mode);
+    overlapped.forEach(seg=>{
+      L.polyline(seg.points,{color:getIRIColor(seg.iri),weight:5,opacity:0.8})
+        .addTo(state.mapGlobal).on('click',()=>showSegmentInfo(seg));
+    });
+  }else{
+    selectedRoutes.forEach(route=>{
+      if(route.segments?.length)
+        route.segments.forEach(seg=>{
+          const iri=mode==='iri_measured'?seg.iriMeasuredAvg:seg.iriCorrectedAvg;
+          L.polyline(seg.points.map(p=>[p.lat,p.lng]),{color:getIRIColor(iri),weight:5,opacity:0.8})
+            .addTo(state.mapGlobal).on('click',()=>showSegmentInfo({...seg,iri,routeId:route.id}));
+        });
+      else
+        L.polyline(route.points.map(p=>[p.lat,p.lon]),{color:getIRIColor(mode==='iri_measured'?route.avgIRIMeasured:route.avgIRICorrected),weight:3,opacity:0.7}).addTo(state.mapGlobal);
+    });
+  }
+  const allPts=selectedRoutes.flatMap(r=>r.points.map(p=>[p.lat,p.lon]));
+  if(allPts.length) state.mapGlobal.fitBounds(L.latLngBounds(allPts),{padding:[20,20]});
+}
+
+function computeOverlappedSegments(routes,mode){
+  const allSegs=[];
+  routes.forEach(route=>{
+    if(route.segments) route.segments.forEach(seg=>{
+      allSegs.push({...seg,routeId:route.id,iri:mode==='iri_measured'?seg.iriMeasuredAvg:seg.iriCorrectedAvg});
+    });
+  });
+  const processed=new Set(),result=[];
+  for(let i=0;i<allSegs.length;i++){
+    if(processed.has(i))continue;
+    const base=allSegs[i],overlapping=[base];
+    let sumIRI=base.iri,count=1;
+    for(let j=i+1;j<allSegs.length;j++){
+      if(processed.has(j)||base.routeId===allSegs[j].routeId)continue;
+      if(haveOverlappingPoints(base.points,allSegs[j].points,10)){
+        overlapping.push(allSegs[j]); sumIRI+=allSegs[j].iri; count++;
+        processed.add(j);
+      }
+    }
+    if(count>1)
+      result.push({points:base.points,iri:sumIRI/count,iriMeasuredAvg:null,iriCorrectedAvg:sumIRI/count,speedAvg:null,distance:base.distance,color:getIRIColor(sumIRI/count),routeId:'average',tipo:'promedio'});
+    else
+      result.push(base);
+    processed.add(i);
+  }
+  return result;
+}
+function haveOverlappingPoints(pts1,pts2,thr){
+  for(const p1 of pts1) for(const p2 of pts2) if(calculateDistance(p1.lat,p1.lng,p2.lat,p2.lng)<=thr) return true;
+  return false;
+}
+function showSegmentInfo(seg){
+  document.getElementById('segmentInfo').classList.remove('hidden');
+  document.getElementById('segmentDetails').innerHTML=`
+    <p><strong>IRI Medido:</strong> ${seg.iriMeasuredAvg?.toFixed(2)||'N/A'}</p>
+    <p><strong>IRI Corregido:</strong> ${seg.iriCorrectedAvg?.toFixed(2)||'N/A'}</p>
+    ${seg.routeId==='average'?'<p><em>Tramo promedio de varias rutas</em></p>':''}
+    <p><strong>Velocidad prom.:</strong> ${seg.speedAvg?.toFixed(1)||'N/A'} km/h</p>
+    <p><strong>Longitud:</strong> ${seg.distance?.toFixed(1)} m</p>
+    ${seg.routeId!=='average'?`<button class="btn btn-sm btn-secondary" onclick="viewRouteDetail('${seg.routeId}')">Ver ruta completa</button>`:''}`;
+}
+
+// ============ INICIALIZACIÓN ============
+document.addEventListener('DOMContentLoaded',()=>{
+  initMeasureMap();
+  initGlobalMap();
+  initSensorChart();
+  startGPS();
+  startAccelerometer();
+
+  const allRoutes = getAllRoutes();
+  state.selectedRouteIds = new Set(allRoutes.map(r => r.id));
+  updateAverageButton();
+
+  document.getElementById('coefA').addEventListener('input',e=>document.getElementById('coefAVal').textContent=parseFloat(e.target.value).toFixed(2));
+  document.getElementById('coefB').addEventListener('input',e=>document.getElementById('coefBVal').textContent=parseFloat(e.target.value).toFixed(2));
+  document.getElementById('coefA').value=config.coefA; document.getElementById('coefB').value=config.coefB;
+  document.getElementById('coefAVal').textContent=config.coefA.toFixed(2); document.getElementById('coefBVal').textContent=config.coefB.toFixed(2);
+  const activeId=localStorage.getItem('roadcheck_active_vehicle');
+  if(activeId){const v=getAllVehicles().find(v=>v.id===activeId);if(v)updateVehicleDisplay(v);}
+});
