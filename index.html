@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0f16"/>
+  <title>RoadCheck IRI Pro</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #0a0f16;
+      --bg-card: rgba(18, 25, 35, 0.85);
+      --bg-panel: rgba(25, 33, 46, 0.7);
+      --accent-primary: #f59e0b;
+      --accent-secondary: #3b82f6;
+      --accent-danger: #ef4444;
+      --accent-success: #10b981;
+      --accent-warm: #b91c1c;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --border-glass: rgba(255,255,255,0.08);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: radial-gradient(ellipse at top, #1a2332 0%, var(--bg-deep) 70%);
+      color: var(--text-primary);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      height: 100vh;
+      overflow: hidden;
+      padding: 8px;
+    }
+    .app-container {
+      width: 100%;
+      max-width: 460px;
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border-glass);
+      border-radius: 28px;
+      padding: 12px 14px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow: hidden;
+    }
+    .app-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .app-logo {
+      font-size: 1.3rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-warning));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .nav-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+      width: 100%;
+    }
+    .nav-btn {
+      flex: 1;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border-glass);
+      color: var(--text-secondary);
+      padding: 10px 12px;
+      border-radius: 22px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .nav-btn.active {
+      background: var(--accent-primary);
+      color: #0a0f16;
+      border-color: transparent;
+    }
+    .main-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+    }
+    .tab-content {
+      flex: 1;
+      overflow-y: auto;
+    }
+    .hidden { display: none !important; }
+
+    .iri-indicators {
+      display: flex;
+      gap: 10px;
+    }
+    .iri-card {
+      flex: 1;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glass);
+      border-radius: 16px;
+      padding: 12px;
+      text-align: center;
+    }
+    .iri-card .label {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      opacity: 0.7;
+    }
+    .iri-card .value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.8rem;
+      font-weight: 700;
+      display: block;
+      margin-top: 4px;
+    }
+    .iri-measured .value { color: var(--accent-secondary); }
+    .iri-corrected .value { color: var(--accent-primary); }
+
+    .secondary-metrics {
+      display: flex;
+      justify-content: space-around;
+      font-size: 0.7rem;
+      opacity: 0.9;
+      padding: 4px 0;
+    }
+    .secondary-metrics span {
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Mapa 225px (150 * 1.5) */
+    .map-container {
+      height: 225px;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 1px solid var(--border-glass);
+      background: #0f172a;
+      flex-shrink: 0;
+    }
+    #mapMeasure, #mapGlobal { height: 100%; width: 100%; }
+
+    /* Gráfico 180px (120 * 1.5) */
+    .chart-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glass);
+      border-radius: 18px;
+      padding: 8px;
+      height: 180px;
+      flex-shrink: 0;
+    }
+    .chart-panel canvas { width: 100%!important; height: 100%!important; }
+
+    .action-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .btn {
+      padding: 10px 12px;
+      border-radius: 22px;
+      border: none;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      flex: 1;
+      min-width: 60px;
+      transition: all 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .btn-primary { background: linear-gradient(135deg, var(--accent-primary), var(--accent-warning)); color: #0a0f16; }
+    .btn-secondary { background: rgba(255,255,255,0.05); color: var(--text-primary); border: 1px solid var(--border-glass); }
+    .btn-accent { background: var(--accent-secondary); color: white; }
+    .btn-danger { background: var(--accent-danger); color: white; }
+    .btn-success { background: var(--accent-success); color: white; }
+    .btn-full { flex: 1 1 100%; }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-glass);
+      border-radius: 14px;
+      padding: 10px;
+    }
+    .list-container { max-height: 200px; overflow-y: auto; }
+    .list-item {
+      background: rgba(0,0,0,0.2); border-radius: 10px; padding: 10px; margin-bottom: 4px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.8rem; cursor: pointer; border: 1px solid transparent;
+    }
+    .list-item.active { border-color: var(--accent-primary); background: rgba(245,158,11,0.1); }
+    .custom-checkbox { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; }
+    .custom-checkbox input { accent-color: var(--accent-primary); width: 16px; height: 16px; }
+
+    .modal-overlay {
+      position: fixed; top:0; left:0; width:100%; height:100%;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(6px);
+      display:flex; justify-content:center; align-items:center; z-index:2000;
+    }
+    .modal-box {
+      background: var(--bg-card); border: 1px solid var(--border-glass);
+      border-radius: 24px; padding: 18px; width: 90%; max-width: 400px; max-height: 80vh; overflow-y: auto;
+    }
+    .segment-control {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--bg-panel); border-radius: 14px;
+      padding: 6px 12px; border: 1px solid var(--border-glass);
+    }
+    .segment-control input[type=range] { flex: 1; accent-color: var(--accent-primary); }
+
+    /* Barra de progreso para calibración */
+    .progress-bar {
+      width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-bottom: 4px;
+    }
+    .progress-fill {
+      width: 0%; height: 100%; background: var(--accent-primary); border-radius: 3px; transition: width 0.3s;
+    }
+
+    /* PANTALLA DE MEDICIÓN ACTIVA */
+    #meas-active-screen {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%);
+      z-index: 3000;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      overflow: hidden;
+    }
+    #meas-active-screen .meas-header {
+      text-align: center;
+      font-size: 1.2rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+      color: #fca5a5;
+    }
+    #meas-active-screen .iri-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    #meas-active-screen .meas-map {
+      flex: 1;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 8px;
+      min-height: 150px;
+    }
+    #mapMeasureActive { height: 100%; width: 100%; }
+    #meas-active-screen .meas-chart {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      padding: 8px;
+      height: 120px;
+      margin-bottom: 8px;
+    }
+    #meas-active-screen .meas-chart canvas { width:100%!important; height:100%!important; }
+    #meas-active-screen .iri-stats {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 10px;
+      font-size: 0.8rem;
+    }
+    #meas-active-screen .iri-stats div {
+      text-align: center;
+      background: rgba(0,0,0,0.3);
+      padding: 6px 12px;
+      border-radius: 12px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #meas-active-screen .meas-buttons {
+      display: flex;
+      gap: 10px;
+    }
+    @media (max-width: 400px) {
+      .iri-card .value { font-size: 1.4rem; }
+      .btn { padding: 8px 10px; font-size: 0.7rem; }
+    }
+  </style>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+</head>
+<body>
+  <div class="app-container" id="main-app">
+    <div class="app-header">
+      <div class="app-logo">ROADCHECK IRI PRO</div>
+      <div class="nav-row">
+        <button class="nav-btn" onclick="openGarage()">🚗 COCHE</button>
+        <button class="nav-btn" onclick="switchTab('history')">HISTORIAL</button>
+        <button class="nav-btn" onclick="switchTab('globalMap')">VISOR</button>
+      </div>
+    </div>
+
+    <!-- Pantalla principal -->
+    <div id="main-screen" class="main-screen">
+      <div class="iri-indicators">
+        <div class="iri-card iri-measured"><span class="label">IRI MEDIDO</span><span class="value" id="iriMeasured">---</span></div>
+        <div class="iri-card iri-corrected"><span class="label">IRI CORREGIDO</span><span class="value" id="iriCorrected">---</span></div>
+      </div>
+      <div class="secondary-metrics">
+        <span>Vel: <span id="speedValue">---</span></span>
+        <span>Dist: <span id="distanceValue">0 m</span></span>
+      </div>
+      <div id="qualityIndicator" class="panel hidden" style="text-align:center; font-weight:600; font-size:0.75rem; padding:4px;"></div>
+      <div class="map-container" id="measMapContainer"><div id="mapMeasure"></div></div>
+      <div class="chart-panel"><canvas id="sensorChart"></canvas></div>
+      <div class="action-buttons">
+        <button class="btn btn-secondary" onclick="openSpeedCorrection()">⚡ CORR. VELOCIDAD</button>
+        <button class="btn btn-secondary" onclick="calibratePhonePosition()">📱 CALIBRAR</button>
+        <button id="btnStart" class="btn btn-primary btn-full" onclick="startMeasurement()">▶ INICIAR MEDICIÓN</button>
+      </div>
+      <div id="calibrationStatus" class="panel hidden" style="text-align:center; font-size:0.75rem; padding:6px;">
+        <div class="progress-bar"><div id="calProgressFill" class="progress-fill" style="width:0%;"></div></div>
+        <span id="calStatusText">Calibrando...</span>
+      </div>
+    </div>
+
+    <!-- Pestaña Historial -->
+    <div id="tab-history" class="tab-content hidden">
+      <div style="display:flex; gap:6px; margin-bottom:8px;">
+        <button class="btn btn-secondary" onclick="loadHistory()"><i class="fas fa-sync"></i></button>
+        <button class="btn btn-danger" onclick="clearAllHistory()"><i class="fas fa-trash"></i></button>
+      </div>
+      <div id="historyList" class="list-container"><p style="text-align:center; opacity:0.7;">Sin rutas</p></div>
+    </div>
+
+    <!-- Pestaña Visor -->
+    <div id="tab-globalMap" class="tab-content hidden">
+      <div class="panel" style="margin-bottom:8px;">
+        <h4 style="font-size:0.8rem;">Rutas activas</h4>
+        <div id="routeCheckboxes"></div>
+        <div style="display:flex; gap:4px; margin-top:6px;">
+          <button class="btn btn-sm btn-secondary" onclick="toggleAllRoutes(true)">Todas</button>
+          <button class="btn btn-sm btn-secondary" onclick="toggleAllRoutes(false)">Ninguna</button>
+          <button id="avgToggleBtn" class="btn btn-sm btn-secondary" onclick="toggleAverageOverlaps()">Promediar</button>
+          <button class="btn btn-sm btn-secondary" onclick="refreshGlobalMap()">Refrescar</button>
+        </div>
+      </div>
+      <div class="map-container" style="height:180px;"><div id="mapGlobal"></div></div>
+      <select id="globalViewMode" onchange="updateGlobalMap()" style="margin-top:4px;width:100%;padding:8px;border-radius:12px;background:var(--bg-panel);border:1px solid var(--border-glass);color:var(--text-primary);font-size:0.75rem;">
+        <option value="iri_measured">IRI Medido</option>
+        <option value="iri_corrected" selected>IRI Corregido</option>
+      </select>
+      <div id="segmentInfo" class="panel hidden" style="margin-top:6px;"><div id="segmentDetails"></div></div>
+    </div>
+
+    <!-- Modales -->
+    <div id="routeModal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <h3 id="routeModalTitle"></h3>
+        <p><strong>Fecha:</strong> <span id="routeDate"></span></p>
+        <p><strong>Distancia:</strong> <span id="routeDistance"></span></p>
+        <p><strong>IRI Med. Prom:</strong> <span id="routeIRIMeasuredAvg"></span></p>
+        <p><strong>IRI Corr. Prom:</strong> <span id="routeIRICorrectedAvg"></span></p>
+        <div id="routeSegmentList" style="max-height:120px;overflow-y:auto;margin:8px 0;"></div>
+        <div class="action-buttons" style="flex-wrap:wrap;"></div>
+      </div>
+    </div>
+    <div id="garageModal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <h3>Selecciona un vehículo</h3>
+        <div id="garageList" class="list-container"></div>
+        <button class="btn btn-secondary" onclick="showAddVehicleModal()" style="margin-top:8px;width:100%;">+ Añadir coche</button>
+        <button class="btn btn-primary" onclick="closeGarage()" style="margin-top:8px;width:100%;">Cerrar</button>
+      </div>
+    </div>
+    <div id="addVehicleModal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <h3>Añadir vehículo</h3>
+        <input type="text" id="vehicleName" placeholder="Marca y modelo" style="width:100%;padding:8px;margin:6px 0;background:var(--bg-panel);border:1px solid var(--border-glass);border-radius:10px;color:white;">
+        <label>Coef. a: <span id="vehicleCoefAVal">2.00</span></label><input type="range" id="vehicleCoefA" min="0.5" max="5.0" step="0.05" value="2.0">
+        <label>Coef. b: <span id="vehicleCoefBVal">0.50</span></label><input type="range" id="vehicleCoefB" min="0.0" max="3.0" step="0.05" value="0.5">
+        <div class="action-buttons" style="margin-top:8px;"><button class="btn btn-primary" id="btnSaveVehicle">Guardar</button><button class="btn btn-secondary" onclick="closeVehicleModal()">Cancelar</button></div>
+      </div>
+    </div>
+    <div id="speedCorrectionModal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <h3>Corrección por Velocidad</h3>
+        <label>Coef. k: <span id="speedKVal">0.015</span></label>
+        <input type="range" id="speedK" min="0" max="0.05" step="0.001" value="0.015" oninput="document.getElementById('speedKVal').textContent=parseFloat(this.value).toFixed(3)">
+        <label>Velocidad ref. (km/h): <span id="refSpeedVal">80</span></label>
+        <input type="range" id="refSpeed" min="30" max="120" step="5" value="80" oninput="document.getElementById('refSpeedVal').textContent=this.value">
+        <button class="btn btn-primary" style="width:100%;margin-top:12px;" id="saveSpeedBtn">Guardar</button>
+        <button class="btn btn-secondary" style="width:100%;margin-top:4px;" onclick="closeSpeedCorrection()">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANTALLA DE MEDICIÓN ACTIVA -->
+  <div id="meas-active-screen" class="hidden">
+    <div class="meas-header">ROADCHECK IRI PRO</div>
+    <div class="iri-row">
+      <div class="iri-card"><span class="label">IRI MEDIDO</span><span class="value" id="activeIriMeasured" style="color:#3b82f6;">---</span></div>
+      <div class="iri-card"><span class="label">IRI CORREGIDO</span><span class="value" id="activeIriCorrected" style="color:#f59e0b;">---</span></div>
+    </div>
+    <div class="meas-map"><div id="mapMeasureActive"></div></div>
+    <div class="meas-chart"><canvas id="activeSensorChart"></canvas></div>
+    <div class="iri-stats">
+      <div>IRI MAX: <span id="iriMax">---</span></div>
+      <div>IRI MED: <span id="iriMed">---</span></div>
+      <div>IRI MIN: <span id="iriMin">---</span></div>
+    </div>
+    <div class="meas-buttons">
+      <button id="btnPauseActive" class="btn btn-accent" onclick="pauseMeasurement()">⏸ PAUSAR</button>
+      <button id="btnResumeActive" class="btn btn-accent hidden" onclick="resumeMeasurement()">▶ REANUDAR</button>
+      <button class="btn btn-danger" onclick="stopMeasurement()">⏹ DETENER</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+  <script>
+    window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); window.deferredPrompt = e; });
+    function installPWA() { if(window.deferredPrompt) window.deferredPrompt.prompt(); }
+    document.getElementById('routeModal').addEventListener('click', function(e){ if(e.target===this) closeModal(); });
+    document.getElementById('garageModal').addEventListener('click', function(e){ if(e.target===this) closeGarage(); });
+    document.getElementById('addVehicleModal').addEventListener('click', function(e){ if(e.target===this) closeVehicleModal(); });
+    document.getElementById('speedCorrectionModal').addEventListener('click', function(e){ if(e.target===this) closeSpeedCorrection(); });
+  </script>
+</body>
+</html>
